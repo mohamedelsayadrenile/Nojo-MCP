@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     issuer_url: str = Field(alias="NOJO_ISSUER_URL")
     resource_server_url: str = Field(alias="NOJO_RESOURCE_SERVER_URL")
+    nojo_api_base_url: str = Field(alias="NOJO_API_BASE_URL")
 
     token_exchange_url: str | None = Field(None, alias="TOKEN_EXCHANGE_URL")
     mcp_oauth_client_id: str | None = Field(None, alias="MCP_OAUTH_CLIENT_ID")
@@ -66,7 +67,7 @@ class Settings(BaseSettings):
         mode="before",
     )(_split_csv)
 
-    @field_validator("issuer_url", "resource_server_url")
+    @field_validator("issuer_url", "resource_server_url", "nojo_api_base_url")
     @classmethod
     def remove_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")

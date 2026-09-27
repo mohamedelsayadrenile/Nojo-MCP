@@ -4,3 +4,7 @@ class NojoAPIError(Exception):
 
 class TokenExchangeRejectedError(NojoAPIError):
     pass
+
+
+class NojoAPIRequestError(NojoAPIError):
+    pass

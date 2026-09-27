@@ -10,17 +10,16 @@ from starlette.responses import JSONResponse, Response
 from src.core.config import Settings
 from src.services.auth import ExchangeTokenVerifier
 from src.services.http import build_http_client
+from src.services.nojo_client import NojoClient
 from src.tools import AppState, register_tools
 
 logger = logging.getLogger(__name__)
 
 INSTRUCTIONS = """\
-The Nojo MCP server. It is currently a sign-in bridge only: the single whoami tool \
-reports which Nojo account the connection is authenticated as.
-
-Platform tools for devices and sensor readings are not exposed yet. If the user asks \
-for data, say the connector is connected but no data tools are available yet rather \
-than guessing at values.\
+The Nojo MCP server. whoami reports which Nojo account the connection is authenticated \
+as. get_current_user, list_farms, list_crops, list_alerts, and list_stations call the \
+Nojo platform API on behalf of the authenticated user to report their profile, farms, \
+crops, active alerts, and IoT stations.\
 """
 
 
@@ -31,13 +30,19 @@ def build_server(settings: Settings) -> MCPServer[AppState]:
     async def lifespan(_: MCPServer[AppState]) -> AsyncIterator[AppState]:
         client = build_http_client(settings)
         verifier.http_client = client
+        nojo_client = NojoClient(client, settings)
         logger.info(
             "nojo_mcp_starting issuer=%s resource=%s",
             settings.issuer_url,
             settings.resource_server_url,
         )
         try:
-            yield AppState(client=client, settings=settings, verifier=verifier)
+            yield AppState(
+                client=client,
+                settings=settings,
+                verifier=verifier,
+                nojo_client=nojo_client,
+            )
         finally:
             verifier.http_client = None
             await client.aclose()

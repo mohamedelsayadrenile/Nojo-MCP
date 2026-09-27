@@ -10,6 +10,7 @@ from mcp_types import ToolAnnotations
 
 from src.core.config import Settings
 from src.services.auth import ExchangeTokenVerifier, NojoAccessToken
+from src.services.nojo_client import NojoClient
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class AppState:
     client: httpx.AsyncClient
     settings: Settings
     verifier: ExchangeTokenVerifier
+    nojo_client: NojoClient
 
 
 ServerContext = Context[AppState, Any]
@@ -47,6 +49,41 @@ async def whoami(ctx: ServerContext) -> dict[str, Any]:
     }
 
 
+async def get_current_user(ctx: ServerContext) -> Any:
+    caller = _caller()
+    logger.info("get_current_user_called sub=%s", caller.subject)
+    nojo_client = ctx.request_context.lifespan_context.nojo_client
+    return await nojo_client.get_current_user(caller.nojo_jwt)
+
+
+async def list_farms(ctx: ServerContext) -> Any:
+    caller = _caller()
+    logger.info("list_farms_called sub=%s", caller.subject)
+    nojo_client = ctx.request_context.lifespan_context.nojo_client
+    return await nojo_client.list_farms(caller.nojo_jwt)
+
+
+async def list_crops(ctx: ServerContext) -> Any:
+    caller = _caller()
+    logger.info("list_crops_called sub=%s", caller.subject)
+    nojo_client = ctx.request_context.lifespan_context.nojo_client
+    return await nojo_client.list_crops(caller.nojo_jwt)
+
+
+async def list_alerts(ctx: ServerContext) -> Any:
+    caller = _caller()
+    logger.info("list_alerts_called sub=%s", caller.subject)
+    nojo_client = ctx.request_context.lifespan_context.nojo_client
+    return await nojo_client.list_alerts(caller.nojo_jwt)
+
+
+async def list_stations(ctx: ServerContext) -> Any:
+    caller = _caller()
+    logger.info("list_stations_called sub=%s", caller.subject)
+    nojo_client = ctx.request_context.lifespan_context.nojo_client
+    return await nojo_client.list_stations(caller.nojo_jwt)
+
+
 _DESCRIPTIONS = {
     whoami: (
         "Report which Nojo account this connection is authenticated as.\n\n"
@@ -54,6 +91,23 @@ _DESCRIPTIONS = {
         '"exchange": "ok"}.\n'
         "`subject` is the Nojo user id behind the current session. A successful "
         "call confirms the whole sign-in chain worked; it makes no other request."
+    ),
+    get_current_user: (
+        "Get the Nojo profile of the authenticated user.\n\n"
+        'Returns {"id": str, "name": str, "phone": str, "role": str}.'
+    ),
+    list_farms: "List all farms owned by the authenticated farmer. Returns an array of farms.",
+    list_crops: (
+        "List all crops across every farm owned by the authenticated farmer. "
+        "Returns an array of crops."
+    ),
+    list_alerts: (
+        "List active alerts across the authenticated farmer's farms, for today "
+        "plus the next 3 days. Returns an array of alerts."
+    ),
+    list_stations: (
+        "List the authenticated farmer's IoT station devices. Returns an array "
+        "of stations."
     ),
 }
 

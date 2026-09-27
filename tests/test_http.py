@@ -110,13 +110,20 @@ async def test_initialize_reports_server_identity(build_test_app, backend, mode)
 
 
 @pytest.mark.parametrize("mode", ["legacy", "auto"])
-async def test_whoami_is_the_only_tool(build_test_app, backend, mode):
+async def test_registered_tools(build_test_app, backend, mode):
     app = build_test_app()
     async with running(app), mcp_client(app, backend.grant(), mode=mode) as client:
         tools = (await client.list_tools()).tools
 
-    assert {tool.name for tool in tools} == {"whoami"}
-    assert tools[0].input_schema.get("properties", {}) == {}
+    assert {tool.name for tool in tools} == {
+        "whoami",
+        "get_current_user",
+        "list_farms",
+        "list_crops",
+        "list_alerts",
+        "list_stations",
+    }
+    assert all(tool.input_schema.get("properties", {}) == {} for tool in tools)
 
 
 async def test_whoami_reports_the_exchanged_subject(build_test_app, backend):

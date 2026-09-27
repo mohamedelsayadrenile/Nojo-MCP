@@ -5,12 +5,14 @@ from urllib.parse import parse_qs
 
 ISSUER_URL = "https://auth.nojo.test"
 RESOURCE_SERVER_URL = "http://testserver/mcp"
+API_BASE_URL = "https://api.nojo.test/api"
 TOKEN_EXCHANGE_URL = f"{ISSUER_URL}/oauth/token"
 MCP_CLIENT_ID = "nojo-mcp"
 MCP_CLIENT_SECRET = "test-client-secret"
 
 os.environ.setdefault("NOJO_ISSUER_URL", ISSUER_URL)
 os.environ.setdefault("NOJO_RESOURCE_SERVER_URL", RESOURCE_SERVER_URL)
+os.environ.setdefault("NOJO_API_BASE_URL", API_BASE_URL)
 os.environ.setdefault("ALLOWED_HOSTS", "testserver")
 os.environ.setdefault("TOKEN_EXCHANGE_URL", TOKEN_EXCHANGE_URL)
 os.environ.setdefault("MCP_OAUTH_CLIENT_ID", MCP_CLIENT_ID)
@@ -26,6 +28,7 @@ def make_settings(**overrides: Any) -> Settings:
     defaults: dict[str, Any] = {
         "NOJO_ISSUER_URL": ISSUER_URL,
         "NOJO_RESOURCE_SERVER_URL": RESOURCE_SERVER_URL,
+        "NOJO_API_BASE_URL": API_BASE_URL,
         "ALLOWED_HOSTS": ["testserver"],
         "TOKEN_EXCHANGE_URL": TOKEN_EXCHANGE_URL,
         "MCP_OAUTH_CLIENT_ID": MCP_CLIENT_ID,
@@ -39,9 +42,11 @@ class BackendRecorder:
 
     def __init__(self) -> None:
         self.exchanges: list[httpx.Request] = []
+        self.platform_requests: list[httpx.Request] = []
         self.clients: list[httpx.AsyncClient] = []
         self.exchange_status_code: int | None = None
         self.malformed = False
+        self.platform_responses: dict[str, tuple[int, Any]] = {}
         self._grants: dict[str, dict[str, Any]] = {}
 
     def grant(self, user: str = "user-1", *, expires_in: int = 900) -> str:
@@ -59,6 +64,13 @@ class BackendRecorder:
         return {key: values[0] for key, values in body.items()}
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/oauth/token":
+            self.platform_requests.append(request)
+            status, body = self.platform_responses.get(
+                request.url.path, (200, {"error": "not_stubbed"})
+            )
+            return httpx.Response(status, json=body)
+
         self.exchanges.append(request)
         if self.exchange_status_code is not None:
             return httpx.Response(
