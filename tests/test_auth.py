@@ -1,3 +1,4 @@
+import base64
 import time
 
 import httpx
@@ -43,14 +44,57 @@ async def test_client_id_falls_back_when_the_backend_omits_it():
     assert result.client_id is None
 
 
-@pytest.mark.parametrize("status_code", [400, 401])
-async def test_rejections_raise_token_exchange_rejected(status_code):
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"error": "invalid_grant"},
+        {"error": "something_else"},
+        {},
+        "not json at all",
+    ],
+)
+async def test_a_400_rejects_the_subject_token(body):
+    """Any 400 that is not invalid_request means the caller must sign in again."""
     settings = make_settings()
-    async with client_returning(
-        httpx.Response(status_code, json={"error": "invalid_grant"})
-    ) as http:
+    kwargs = {"json": body} if isinstance(body, dict) else {"text": body}
+    async with client_returning(httpx.Response(400, **kwargs)) as http:
         with pytest.raises(TokenExchangeRejectedError):
             await exchange_token(http, settings, "oauth-token")
+
+
+async def test_a_400_invalid_request_is_our_bug_not_a_rejected_token():
+    """Returning 401 here would send the client through sign-in forever."""
+    settings = make_settings()
+    async with client_returning(
+        httpx.Response(400, json={"error": "invalid_request"})
+    ) as http:
+        with pytest.raises(NojoAPIError) as excinfo:
+            await exchange_token(http, settings, "oauth-token")
+
+    assert not isinstance(excinfo.value, TokenExchangeRejectedError)
+
+
+async def test_a_401_is_this_server_being_rejected_not_the_caller():
+    """401 invalid_client means our own credentials are wrong: a config problem."""
+    settings = make_settings()
+    async with client_returning(
+        httpx.Response(401, json={"error": "invalid_client"})
+    ) as http:
+        with pytest.raises(NojoAPIError) as excinfo:
+            await exchange_token(http, settings, "oauth-token")
+
+    assert not isinstance(excinfo.value, TokenExchangeRejectedError)
+
+
+async def test_rate_limiting_is_not_a_rejected_token():
+    settings = make_settings()
+    async with client_returning(
+        httpx.Response(429, json={"error": "temporarily_unavailable"})
+    ) as http:
+        with pytest.raises(NojoAPIError) as excinfo:
+            await exchange_token(http, settings, "oauth-token")
+
+    assert not isinstance(excinfo.value, TokenExchangeRejectedError)
 
 
 @pytest.mark.parametrize("status_code", [403, 500, 503])
@@ -143,7 +187,7 @@ async def test_an_expired_entry_is_exchanged_again():
     verifier.http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
     await verifier.verify_token("oauth-token")
-    # expires_in is below the 30s safety margin, so the entry is already stale.
+    # expires_in is below the 60s safety margin, so the entry is already stale.
     await verifier.verify_token("oauth-token")
 
     assert len(calls) == 2
@@ -177,6 +221,24 @@ async def test_no_http_client_verifies_as_none():
     verifier = ExchangeTokenVerifier(make_settings())
 
     assert await verifier.verify_token("oauth-token") is None
+
+
+async def test_credentials_are_urlencoded_before_base64():
+    """RFC 6749 2.3.1, and what the backend documents it decodes."""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=GOOD_BODY)
+
+    settings = make_settings(
+        MCP_OAUTH_CLIENT_ID="nojo mcp", MCP_OAUTH_CLIENT_SECRET="p:a+s/s word"
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        await exchange_token(http, settings, "oauth-token")
+
+    expected = base64.b64encode(b"nojo%20mcp:p%3Aa%2Bs%2Fs%20word").decode()
+    assert seen[0].headers["authorization"] == f"Basic {expected}"
 
 
 async def test_the_exchange_posts_to_the_configured_url():

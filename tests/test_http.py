@@ -1,5 +1,6 @@
 import base64
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
 import httpx2
 import pytest
@@ -143,7 +144,8 @@ async def test_exchange_is_authenticated_as_this_server(build_test_app, backend)
     async with running(app), mcp_client(app, token) as client:
         await client.call_tool("whoami", {})
 
-    expected = base64.b64encode(f"{MCP_CLIENT_ID}:{MCP_CLIENT_SECRET}".encode()).decode()
+    credentials = f"{quote(MCP_CLIENT_ID, safe='')}:{quote(MCP_CLIENT_SECRET, safe='')}"
+    expected = base64.b64encode(credentials.encode()).decode()
     assert backend.exchanges[0].headers["authorization"] == f"Basic {expected}"
     assert backend.exchange_form() == {
         "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -204,15 +206,22 @@ async def test_token_the_backend_rejects_gets_the_challenge(build_test_app, back
     assert len(backend.exchanges) == 1
 
 
-async def test_rejected_exchange_client_gets_the_challenge(build_test_app, backend):
+async def test_rejected_exchange_client_is_a_server_error_not_a_challenge(
+    build_test_app, backend
+):
+    """401 invalid_client is our own misconfiguration. A challenge would loop the
+    client through sign-in forever, since re-authenticating cannot fix it."""
     backend.exchange_status_code = 401
     app = build_test_app()
     async with running(app):
-        response = await raw(app, backend.grant()).post(
-            "/mcp", json=INITIALIZE, headers=JSON_RPC_HEADERS
+        client = httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://testserver",
+            headers={"Authorization": f"Bearer {backend.grant()}"},
         )
+        response = await client.post("/mcp", json=INITIALIZE, headers=JSON_RPC_HEADERS)
 
-    assert response.status_code == 401
+    assert response.status_code == 500
 
 
 async def test_backend_outage_is_not_a_401(build_test_app, backend):

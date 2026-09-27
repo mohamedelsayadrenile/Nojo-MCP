@@ -284,9 +284,14 @@ Exchanges the user's OAuth access token for a short-lived Nojo JWT. This endpoin
 ### Request Headers
 
 ```http
-Authorization: Basic base64(<mcp_client_id>:<mcp_client_secret>)
+Authorization: Basic base64(urlencode(<mcp_client_id>) + ":" + urlencode(<mcp_client_secret>))
 Content-Type: application/x-www-form-urlencoded
 ```
+
+Each half is form-urlencoded before the base64, per RFC 6749 2.3.1. This is identical to the plain
+form for an alphanumeric secret and only differs when the issued secret contains reserved
+characters — but the backend must decode it the same way, or such a secret fails with
+`invalid_client` and no obvious cause.
 
 ### Request Body
 
@@ -326,11 +331,26 @@ grant_type=urn:ietf:params:oauth:grant-type:token-exchange
 
 All error bodies are `application/json` and may carry an optional `error_description`. The `401` response must include a `WWW-Authenticate: Basic` header.
 
-| Status | Body | Description |
-|---|---|---|
-| `401` | `{"error":"invalid_client"}` | Invalid MCP client credentials |
-| `400` | `{"error":"invalid_grant"}` | Invalid, expired, revoked, wrong-resource, or unauthorized subject token |
-| `400` | `{"error":"invalid_request"}` | Missing or invalid request fields |
-| `500` | `{"error":"server_error"}` | Unexpected backend error |
+| Status | Body | Description | MCP server returns |
+|---|---|---|---|
+| `400` | `{"error":"invalid_grant"}` | Invalid, expired, revoked, wrong-resource, or unauthorized subject token | `401` |
+| `400` | `{"error":"invalid_request"}` | Missing or invalid request fields | `500` |
+| `401` | `{"error":"invalid_client"}` | Invalid MCP client credentials | `500` |
+| `429` | `{"error":"temporarily_unavailable"}` | MCP server is over the per-IP rate limit | `500` |
+| `500` | `{"error":"server_error"}` | Unexpected backend error | `500` |
 
-The status codes matter. The MCP server treats `400` and `401` as "this token is no longer usable" and returns `401` to the client so it re-runs OAuth. Any other failure returns `500`, so the client keeps its token and retries. Returning `500` for a rejected token would loop; returning `400` for a backend outage would log users out.
+The status codes matter, and only one of them means "this user must sign in again".
+
+`400 invalid_grant` is that one: the subject token is dead, so the MCP server answers `401` and the
+client re-runs OAuth. Everything else becomes a `500`, which lets the client keep its token and
+retry.
+
+The two cases worth being careful about are `401 invalid_client` and `400 invalid_request`. Both
+describe a fault in the *MCP server's own* request, not in the user's token, so re-authenticating
+cannot fix either one. If the MCP server passed them through as `401`, the client would sign in
+again, succeed, and fail identically — forever, with nothing useful shown to the user. So they are
+reported as `500` and logged at `ERROR` on the MCP side. Note the corollary for the backend: never
+answer a bad subject token with `401`, or well-behaved clients will never recover.
+
+A `400 invalid_grant` for a backend outage would log every user out; a `500` for a genuinely dead
+token would loop. Keep them distinct.

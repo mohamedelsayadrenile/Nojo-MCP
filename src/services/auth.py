@@ -1,8 +1,10 @@
+import base64
 import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from mcp.server.auth.provider import AccessToken, TokenVerifier
@@ -15,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_CLIENT_ID = "nojo-mcp"
 
-_EXPIRY_MARGIN_SECONDS = 30
+_EXPIRY_MARGIN_SECONDS = 60
 TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
 ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 
@@ -81,6 +83,23 @@ class ExchangeTokenVerifier(TokenVerifier):
             del self._cache[key]
 
 
+def _basic_auth_header(settings: Settings) -> str:
+    """RFC 6749 2.3.1: form-urlencode each half before base64, as the backend does."""
+    credentials = "{}:{}".format(
+        quote(settings.mcp_oauth_client_id, safe=""),
+        quote(settings.mcp_oauth_client_secret.get_secret_value(), safe=""),
+    )
+    return "Basic " + base64.b64encode(credentials.encode()).decode()
+
+
+def _error_code(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    return payload.get("error") or "" if isinstance(payload, dict) else ""
+
+
 async def exchange_token(
     http_client: httpx.AsyncClient, settings: Settings, oauth_token: str
 ) -> ExchangedToken:
@@ -94,10 +113,7 @@ async def exchange_token(
         response = await http_client.post(
             settings.token_exchange_url,
             data=form,
-            auth=(
-                settings.mcp_oauth_client_id,
-                settings.mcp_oauth_client_secret.get_secret_value(),
-            ),
+            headers={"Authorization": _basic_auth_header(settings)},
         )
     except httpx.TransportError as exc:
         logger.warning(
@@ -105,12 +121,31 @@ async def exchange_token(
         )
         raise NojoAPIError("The Nojo sign-in service is unreachable.") from exc
 
+    # 401 is about *this server's* credentials, never the caller's token: the backend
+    # answers a bad subject token with 400 invalid_grant. Returning 401 to the client
+    # here would send it through sign-in again, succeed, and fail identically forever.
     if response.status_code == 401:
-        logger.error("token_exchange_failed status_code=401 reason=invalid_client")
-        raise TokenExchangeRejectedError("Token exchange client rejected.")
+        logger.error(
+            "token_exchange_failed status_code=401 reason=invalid_client "
+            "hint=check MCP_OAUTH_CLIENT_ID/MCP_OAUTH_CLIENT_SECRET and that the "
+            "backend has registered this client"
+        )
+        raise NojoAPIError("The Nojo sign-in service rejected this server.")
+
     if response.status_code == 400:
+        # invalid_request is a bug on our side; a 401 would loop like the case above.
+        if _error_code(response) == "invalid_request":
+            logger.error(
+                "token_exchange_failed status_code=400 reason=invalid_request"
+            )
+            raise NojoAPIError("The Nojo sign-in service rejected the request.")
         logger.info("token_exchange_rejected status_code=400")
         raise TokenExchangeRejectedError("OAuth token rejected.")
+
+    if response.status_code == 429:
+        logger.warning("token_exchange_failed status_code=429 reason=rate_limited")
+        raise NojoAPIError("The Nojo sign-in service is rate limiting this server.")
+
     if response.status_code != 200:
         logger.warning("token_exchange_failed status_code=%s", response.status_code)
         raise NojoAPIError(
