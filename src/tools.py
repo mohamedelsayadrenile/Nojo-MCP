@@ -207,6 +207,23 @@ async def get_past_irrigation(
     )
 
 
+async def get_current_alerts(ctx: ServerContext, farm_id: str | None = None) -> Any:
+    settings = ctx.request_context.lifespan_context.settings
+    return await _farm_scoped(ctx, settings.alerts_current_path, _farm_params(farm_id))
+
+
+async def get_past_alerts(
+    ctx: ServerContext,
+    day: Literal["yesterday", "before-yesterday"] | None = None,
+    farm_id: str | None = None,
+) -> Any:
+    settings = ctx.request_context.lifespan_context.settings
+    params = {"day": day} if day else {}
+    return await _farm_scoped(
+        ctx, settings.alerts_history_path, {**params, **_farm_params(farm_id)}
+    )
+
+
 async def get_crop_options(ctx: ServerContext) -> dict[str, Any]:
     caller = _caller()
     state = ctx.request_context.lifespan_context
@@ -521,6 +538,17 @@ _PAST_DAYS_RULES = (
     f"more, tell them only the last {_PAST_DAYS_MAX} days are available."
 )
 
+_ALERT_FIELDS = (
+    "Each alert has `severity` (from lowest to highest: Info, Warning, High, "
+    "Critical), `category` (e.g. Heat Stress, Disease Risk, Irrigation, Wind, "
+    "Spraying), `title`, `description` (why it was raised), and `action` (what "
+    "the farmer should do); the *Ar fields hold the same text in Arabic, so "
+    "answer in the user's language. `cropId` null means the alert is about the "
+    "whole farm, not one crop. If the user asks about one crop, answer only for "
+    "it, matching cropName, cropNameAr, or aliasCropName loosely. Any text field "
+    "can be null. An empty `alerts` list means the farm has no alerts."
+)
+
 _DESCRIPTIONS = {
     whoami: (
         "Report which Nojo account this connection is authenticated as.\n\n"
@@ -545,6 +573,25 @@ _DESCRIPTIONS = {
     list_stations: (
         "List the authenticated farmer's IoT station devices. Returns an array "
         "of stations."
+    ),
+    get_current_alerts: (
+        "Get the alerts of the authenticated farmer's farms for today and the "
+        "next 3 days, from the weather, the crops, and the farm's devices. `date` "
+        "is the day the alert is about (YYYY-MM-DD); null means today. "
+        + _ALERT_FIELDS
+        + "\n\n"
+        + _FARM_SCOPE_RULES
+    ),
+    get_past_alerts: (
+        "Get the past alerts of the authenticated farmer's farms, including "
+        "alerts that have already ended. `day` has only two options: "
+        "'yesterday' or 'before-yesterday' (the day before yesterday). Omit it to "
+        "get both days together, e.g. when the user does not say which. Older "
+        "days are not available: if the user asks for them, say so. `date` is "
+        "always set; use it to tell the two days apart. "
+        + _ALERT_FIELDS
+        + "\n\n"
+        + _FARM_SCOPE_RULES
     ),
     get_crop_options: (
         "List the crop types, soil types, and irrigation systems a new crop can "

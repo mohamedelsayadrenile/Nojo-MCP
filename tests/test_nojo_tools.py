@@ -500,6 +500,8 @@ FARM_SCOPED_TOOLS = {
     "get_past_weather": ("/api/weather/overview/history", {"days": "7"}),
     "get_current_irrigation": ("/api/irrigation/overview", {}),
     "get_past_irrigation": ("/api/irrigation/overview/history", {"days": "7"}),
+    "get_current_alerts": ("/api/alerts/overview", {}),
+    "get_past_alerts": ("/api/alerts/overview/history", {}),
 }
 PAST_TOOLS = {
     "get_past_weather": "/api/weather/overview/history",
@@ -586,4 +588,29 @@ async def test_past_tools_allow_at_most_7_days(build_test_app, backend, tool, da
 
     assert result.is_error
     assert "Only the last 7 days" in result.content[0].text
+    assert backend.platform_requests == []
+
+
+@pytest.mark.parametrize("day", ["yesterday", "before-yesterday"])
+async def test_past_alerts_sends_the_chosen_day(build_test_app, backend, day):
+    backend.platform_responses["/api/alerts/overview/history"] = (200, {"alerts": []})
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool(
+            "get_past_alerts", {"day": day, "farm_id": FARM_ID}
+        )
+
+    assert not result.is_error
+    assert dict(backend.platform_requests[0].url.params) == {
+        "day": day,
+        "farmId": FARM_ID,
+    }
+
+
+async def test_past_alerts_rejects_other_days(build_test_app, backend):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("get_past_alerts", {"day": "last-week"})
+
+    assert result.is_error
     assert backend.platform_requests == []

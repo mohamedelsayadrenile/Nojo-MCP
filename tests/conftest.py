@@ -19,6 +19,8 @@ WEATHER_FORECAST_PATH = "/weather/overview/forecast"
 WEATHER_HISTORY_PATH = "/weather/overview/history"
 IRRIGATION_CURRENT_PATH = "/irrigation/overview"
 IRRIGATION_HISTORY_PATH = "/irrigation/overview/history"
+ALERTS_CURRENT_PATH = "/alerts/overview"
+ALERTS_HISTORY_PATH = "/alerts/overview/history"
 MCP_CLIENT_ID = "nojo-mcp"
 MCP_CLIENT_SECRET = "test-client-secret"
 
@@ -36,6 +38,8 @@ os.environ.setdefault("NOJO_WEATHER_FORECAST_PATH", WEATHER_FORECAST_PATH)
 os.environ.setdefault("NOJO_WEATHER_HISTORY_PATH", WEATHER_HISTORY_PATH)
 os.environ.setdefault("NOJO_IRRIGATION_CURRENT_PATH", IRRIGATION_CURRENT_PATH)
 os.environ.setdefault("NOJO_IRRIGATION_HISTORY_PATH", IRRIGATION_HISTORY_PATH)
+os.environ.setdefault("NOJO_ALERTS_CURRENT_PATH", ALERTS_CURRENT_PATH)
+os.environ.setdefault("NOJO_ALERTS_HISTORY_PATH", ALERTS_HISTORY_PATH)
 os.environ.setdefault("ALLOWED_HOSTS", "testserver")
 os.environ.setdefault("TOKEN_EXCHANGE_URL", TOKEN_EXCHANGE_URL)
 os.environ.setdefault("MCP_OAUTH_CLIENT_ID", MCP_CLIENT_ID)
@@ -105,6 +109,8 @@ def make_settings(**overrides: Any) -> Settings:
         "NOJO_WEATHER_HISTORY_PATH": WEATHER_HISTORY_PATH,
         "NOJO_IRRIGATION_CURRENT_PATH": IRRIGATION_CURRENT_PATH,
         "NOJO_IRRIGATION_HISTORY_PATH": IRRIGATION_HISTORY_PATH,
+        "NOJO_ALERTS_CURRENT_PATH": ALERTS_CURRENT_PATH,
+        "NOJO_ALERTS_HISTORY_PATH": ALERTS_HISTORY_PATH,
         "ALLOWED_HOSTS": ["testserver"],
         "TOKEN_EXCHANGE_URL": TOKEN_EXCHANGE_URL,
         "MCP_OAUTH_CLIENT_ID": MCP_CLIENT_ID,
