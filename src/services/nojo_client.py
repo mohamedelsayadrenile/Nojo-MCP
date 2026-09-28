@@ -9,6 +9,15 @@ from src.services.errors import NojoAPIRequestError
 logger = logging.getLogger(__name__)
 
 
+def _error_message(response: httpx.Response) -> str | None:
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    message = payload.get("message") if isinstance(payload, dict) else None
+    return message if isinstance(message, str) and message else None
+
+
 class NojoClient:
     """Calls the Nojo platform's resource APIs with an already-exchanged Nojo JWT."""
 
@@ -51,6 +60,7 @@ class NojoClient:
             raise NojoAPIRequestError(
                 f"The Nojo platform API returned {response.status_code} for {path}.",
                 status_code=response.status_code,
+                detail=_error_message(response),
             )
 
         try:

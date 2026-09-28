@@ -1,5 +1,7 @@
 import logging
+import re
 from dataclasses import dataclass
+from datetime import date
 from typing import Annotated, Any, Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -9,7 +11,7 @@ from mcp_types import ToolAnnotations
 from pydantic import Field
 
 from src.core.config import Settings
-from src.helpers import farms_and_crops
+from src.helpers import crop_options, farms_and_crops
 from src.services.auth import NojoAccessToken
 from src.services.errors import NojoAPIRequestError
 from src.services.nojo_client import NojoClient
@@ -127,6 +129,15 @@ async def get_farms_and_crops_ids(ctx: ServerContext) -> list[dict[str, Any]]:
     )
 
 
+async def get_crop_options(ctx: ServerContext) -> dict[str, Any]:
+    caller = _caller()
+    state = ctx.request_context.lifespan_context
+    logger.info("crop_options_requested sub=%s", caller.subject)
+    return await crop_options.get_crop_options(
+        state.nojo_client, state.settings, caller.nojo_jwt
+    )
+
+
 async def delete_farm(ctx: ServerContext, farm_id: str) -> dict[str, Any]:
     caller = _caller()
     farm_id = farm_id.strip()
@@ -159,6 +170,95 @@ async def delete_crop(ctx: ServerContext, crop_id: str) -> dict[str, Any]:
     logger.info("crop_deleted sub=%s crop_id=%s", caller.subject, crop_id)
     message = result.get("message") if isinstance(result, dict) else None
     return {"deleted": True, "crop_id": crop_id, "message": message}
+
+
+_ALIAS_MIN, _ALIAS_MAX = 2, 50
+_ALIAS_CHARS = re.compile(r"[\w \-]+")
+_AREA_TO_M2 = {"m²": 1, "feddan": 4200, "ha": 10000}
+_AREA_MIN_M2, _AREA_MAX_M2 = 1, 100_000_000
+
+
+def _required_id(value: str, name: str, source: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ToolError(f"{name} is required. Get it from {source}.")
+    return value
+
+
+def _clean_alias(name: str) -> str:
+    name = name.strip()
+    if (
+        not _ALIAS_MIN <= len(name) <= _ALIAS_MAX
+        or not _ALIAS_CHARS.fullmatch(name)
+        or not any(char.isalpha() for char in name)
+    ):
+        raise ToolError(
+            f"The crop name must be {_ALIAS_MIN}-{_ALIAS_MAX} characters of letters, "
+            "numbers, spaces, '_' or '-', with at least one letter. Ask the user "
+            "for a different name."
+        )
+    return name
+
+
+async def create_crop(
+    ctx: ServerContext,
+    farm_id: str,
+    crop_type_id: str,
+    alias_crop_name: str,
+    planting_date: date,
+    soil_type_id: str,
+    irrigation_system_id: str,
+    land_area: Annotated[float, Field(gt=0)],
+    land_area_unit: Literal["m²", "feddan", "ha"],
+) -> Any:
+    caller = _caller()
+    farm_id = _required_id(farm_id, "farm_id", "get_farms_and_crops_ids")
+    crop_type_id = _required_id(crop_type_id, "crop_type_id", "get_crop_options")
+    soil_type_id = _required_id(soil_type_id, "soil_type_id", "get_crop_options")
+    irrigation_system_id = _required_id(
+        irrigation_system_id, "irrigation_system_id", "get_crop_options"
+    )
+    alias_crop_name = _clean_alias(alias_crop_name)
+    if planting_date > date.today():
+        raise ToolError(
+            "The planting date can't be in the future. Ask the user for the date "
+            "the crop was planted."
+        )
+    if not _AREA_MIN_M2 <= land_area * _AREA_TO_M2[land_area_unit] <= _AREA_MAX_M2:
+        raise ToolError(
+            "The land area must be between 1 m² and 100,000,000 m² "
+            "(1 feddan = 4,200 m², 1 ha = 10,000 m²). Ask the user to correct it."
+        )
+
+    state = ctx.request_context.lifespan_context
+    body = {
+        "farmId": farm_id,
+        "cropTypeId": crop_type_id,
+        "aliasCropName": alias_crop_name,
+        "plantingDate": planting_date.isoformat(),
+        "soilTypeId": soil_type_id,
+        "irrigationSystemId": irrigation_system_id,
+        "landArea": land_area,
+        "landAreaUnit": land_area_unit,
+    }
+    logger.info("crop_create_requested sub=%s farm_id=%s", caller.subject, farm_id)
+    try:
+        crop = await state.nojo_client.post(
+            caller.nojo_jwt, state.settings.crops_path, body
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400:
+            raise ToolError(
+                f"Nojo rejected the crop: {exc.detail or 'invalid input'}. Tell the "
+                "user and ask them to correct it."
+            ) from exc
+        raise
+
+    crop_id = crop.get("id") if isinstance(crop, dict) else None
+    logger.info(
+        "crop_created sub=%s farm_id=%s crop_id=%s", caller.subject, farm_id, crop_id
+    )
+    return crop
 
 
 async def add_farm(
@@ -267,6 +367,19 @@ _DESCRIPTIONS = {
         "List the authenticated farmer's IoT station devices. Returns an array "
         "of stations."
     ),
+    get_crop_options: (
+        "List the crop types, soil types, and irrigation systems a new crop can "
+        "use, as names and ids only.\n\n"
+        'Returns {"cropTypes": [{"cropId": str, "cropName": str, "cropNameAr": '
+        'str}], "soilTypes": [{"soilId": str, "soilName": str}], '
+        '"irrigationSystems": [{"irrigationId": str, "irrigationName": str}]}.\n'
+        "Call this when adding or editing a crop to turn the user's crop type, soil "
+        "type, and irrigation system into ids. Match the user's words loosely: "
+        "accept typos and spelling variants, and compare crop types against both "
+        "cropName and cropNameAr. If a choice is not in these lists, refuse: tell "
+        "the user it is not available and show the available options. Never "
+        "invent an id."
+    ),
     get_farms_and_crops_ids: (
         "List the authenticated farmer's farms and the crops on each, as names "
         "and ids only.\n\n"
@@ -304,6 +417,29 @@ _DELETE_CROP_DESCRIPTION = (
     "Before calling, always ask the user to confirm, naming the crop and its farm "
     "(e.g. 'Delete Avocado from North Field?'), and call only after they agree.\n"
     'Returns {"deleted": true, "crop_id": str, "message": str}.'
+)
+
+
+_CREATE_CROP_DESCRIPTION = (
+    "Add a new crop to one of the authenticated farmer's farms.\n\n"
+    "Resolve the ids first; never invent one:\n"
+    "- farm_id: a farmId from get_farms_and_crops_ids, matching the farm the "
+    "user named loosely (accept typos). If nothing matches, tell the user and "
+    "list their farms.\n"
+    "- crop_type_id (cropId), soil_type_id (soilId), irrigation_system_id "
+    "(irrigationId): from get_crop_options. If the user's crop type, soil type, "
+    "or irrigation system is not in those lists, refuse: tell the user it is not "
+    "available and show the available options.\n"
+    "Ask the user for the rest and never guess them:\n"
+    f"- alias_crop_name: the farmer's own name for this crop, {_ALIAS_MIN}-"
+    f"{_ALIAS_MAX} characters of letters, numbers, spaces, '_' or '-', with at "
+    "least one letter, not already used on the same farm.\n"
+    "- planting_date: YYYY-MM-DD, not in the future.\n"
+    "- land_area and land_area_unit ('m²', 'feddan', or 'ha'): the area must be "
+    "between 1 m² and 100,000,000 m² once converted.\n"
+    "If the call is rejected, tell the user the reason and ask them to correct "
+    "it.\n"
+    "Returns the created crop, including its id."
 )
 
 
@@ -359,3 +495,4 @@ def register_tools(mcp: MCPServer[AppState]) -> None:
     mcp.tool(annotations=_DESTRUCTIVE, description=_DELETE_CROP_DESCRIPTION)(
         delete_crop
     )
+    mcp.tool(annotations=_CREATE, description=_CREATE_CROP_DESCRIPTION)(create_crop)

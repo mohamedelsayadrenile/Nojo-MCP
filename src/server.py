@@ -25,7 +25,9 @@ that list, confirm with the user, then call delete_farm with the farmId. To add 
 collect its name, type, and location from the user, then call add_farm. To change a \
 farm, resolve its farmId the same way and call edit_farm with only the changed fields. \
 To delete a crop, match it to a cropId from get_farms_and_crops_ids, confirm with the \
-user, then call delete_crop.\
+user, then call delete_crop. To add a crop, resolve the farm with \
+get_farms_and_crops_ids and the crop type, soil type, and irrigation system with \
+get_crop_options, ask the user for the rest, then call create_crop.\
 """
 
 

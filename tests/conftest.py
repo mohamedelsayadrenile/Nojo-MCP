@@ -12,6 +12,8 @@ FARMS_OVERVIEW_PATH = "/farms/overview"
 FARMS_PATH = "/farms"
 FARM_PATH = "/farms/{farm_id}"
 CROP_PATH = "/crops/{crop_id}"
+CROPS_PATH = "/crops"
+CROP_OPTIONS_PATH = "/crops/options"
 MCP_CLIENT_ID = "nojo-mcp"
 MCP_CLIENT_SECRET = "test-client-secret"
 
@@ -22,6 +24,8 @@ os.environ.setdefault("NOJO_FARMS_OVERVIEW_PATH", FARMS_OVERVIEW_PATH)
 os.environ.setdefault("NOJO_FARMS_PATH", FARMS_PATH)
 os.environ.setdefault("NOJO_FARM_PATH", FARM_PATH)
 os.environ.setdefault("NOJO_CROP_PATH", CROP_PATH)
+os.environ.setdefault("NOJO_CROPS_PATH", CROPS_PATH)
+os.environ.setdefault("NOJO_CROP_OPTIONS_PATH", CROP_OPTIONS_PATH)
 os.environ.setdefault("ALLOWED_HOSTS", "testserver")
 os.environ.setdefault("TOKEN_EXCHANGE_URL", TOKEN_EXCHANGE_URL)
 os.environ.setdefault("MCP_OAUTH_CLIENT_ID", MCP_CLIENT_ID)
@@ -84,6 +88,8 @@ def make_settings(**overrides: Any) -> Settings:
         "NOJO_FARMS_PATH": FARMS_PATH,
         "NOJO_FARM_PATH": FARM_PATH,
         "NOJO_CROP_PATH": CROP_PATH,
+        "NOJO_CROPS_PATH": CROPS_PATH,
+        "NOJO_CROP_OPTIONS_PATH": CROP_OPTIONS_PATH,
         "ALLOWED_HOSTS": ["testserver"],
         "TOKEN_EXCHANGE_URL": TOKEN_EXCHANGE_URL,
         "MCP_OAUTH_CLIENT_ID": MCP_CLIENT_ID,

@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     farms_path: str = Field(alias="NOJO_FARMS_PATH", min_length=1)
     farm_path: str = Field(alias="NOJO_FARM_PATH", pattern=r"\{farm_id\}")
     crop_path: str = Field(alias="NOJO_CROP_PATH", pattern=r"\{crop_id\}")
+    crops_path: str = Field(alias="NOJO_CROPS_PATH", min_length=1)
+    crop_options_path: str = Field(alias="NOJO_CROP_OPTIONS_PATH", min_length=1)
 
     token_exchange_url: str = Field(alias="TOKEN_EXCHANGE_URL")
     mcp_oauth_client_id: str = Field(alias="MCP_OAUTH_CLIENT_ID")

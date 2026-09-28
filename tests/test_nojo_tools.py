@@ -1,4 +1,5 @@
 import json
+from datetime import date, timedelta
 
 import pytest
 
@@ -311,3 +312,112 @@ async def test_delete_crop_is_marked_destructive(build_test_app, backend):
         tools = {tool.name: tool for tool in (await client.list_tools()).tools}
 
     assert tools["delete_crop"].annotations.destructive_hint is True
+
+
+CROP_OPTIONS = {
+    "cropTypes": [{"cropId": "c-1", "cropName": "Wheat", "cropNameAr": "قمح"}],
+    "soilTypes": [{"soilId": "s-1", "soilName": "Clay"}],
+    "irrigationSystems": [{"irrigationId": "i-1", "irrigationName": "Drip"}],
+}
+
+
+async def test_get_crop_options_returns_the_options(build_test_app, backend):
+    backend.platform_responses["/api/crops/options"] = (200, CROP_OPTIONS)
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("get_crop_options", {})
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == CROP_OPTIONS
+    assert backend.platform_requests[0].headers["authorization"] == (
+        "Bearer nojo-jwt-alice"
+    )
+
+
+async def test_get_crop_options_backend_error_is_a_tool_error(build_test_app, backend):
+    backend.platform_responses["/api/crops/options"] = (500, {"error": "boom"})
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("get_crop_options", {})
+
+    assert result.is_error
+
+
+CREATE_CROP_ARGS = {
+    "farm_id": FARM_ID,
+    "crop_type_id": "c-1",
+    "alias_crop_name": "  Wheat 1 ",
+    "planting_date": "2026-03-15",
+    "soil_type_id": "s-1",
+    "irrigation_system_id": "i-1",
+    "land_area": 2.5,
+    "land_area_unit": "feddan",
+}
+CREATED_CROP = {"id": CROP_ID, "farmId": FARM_ID, "cropTypeName": "Wheat"}
+
+
+async def _create_crop(build_test_app, backend, args):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        return await client.call_tool("create_crop", args)
+
+
+async def test_create_crop_posts_exactly_the_documented_fields(
+    build_test_app, backend
+):
+    backend.platform_responses["/api/crops"] = (201, CREATED_CROP)
+    result = await _create_crop(build_test_app, backend, CREATE_CROP_ARGS)
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == CREATED_CROP
+    request = backend.platform_requests[0]
+    assert request.method == "POST"
+    assert request.url.path == "/api/crops"
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+    assert json.loads(request.content) == {
+        "farmId": FARM_ID,
+        "cropTypeId": "c-1",
+        "aliasCropName": "Wheat 1",
+        "plantingDate": "2026-03-15",
+        "soilTypeId": "s-1",
+        "irrigationSystemId": "i-1",
+        "landArea": 2.5,
+        "landAreaUnit": "feddan",
+    }
+
+
+async def test_create_crop_400_relays_the_backend_reason(build_test_app, backend):
+    backend.platform_responses["/api/crops"] = (
+        400,
+        {"message": "aliasCropName already used on this farm"},
+    )
+    result = await _create_crop(build_test_app, backend, CREATE_CROP_ARGS)
+
+    assert result.is_error
+    assert "aliasCropName already used on this farm" in result.content[0].text
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"alias_crop_name": "W"},
+        {"alias_crop_name": "123"},
+        {"alias_crop_name": "Wheat!"},
+        {"alias_crop_name": "x" * 51},
+        {"planting_date": (date.today() + timedelta(days=1)).isoformat()},
+        {"planting_date": "15-03-2026"},
+        {"land_area": 0},
+        {"land_area": 0.0001, "land_area_unit": "m²"},
+        {"land_area": 30000, "land_area_unit": "feddan"},
+        {"land_area_unit": "acre"},
+        {"farm_id": "  "},
+        {"soil_type_id": ""},
+    ],
+)
+async def test_create_crop_rejects_invalid_input_without_calling_the_api(
+    build_test_app, backend, override
+):
+    result = await _create_crop(build_test_app, backend, {**CREATE_CROP_ARGS, **override})
+
+    assert result.is_error
+    assert backend.platform_requests == []
