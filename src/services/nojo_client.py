@@ -22,12 +22,18 @@ class NojoClient:
     async def delete(self, jwt: str, path: str) -> Any:
         return await self._request("DELETE", jwt, path)
 
-    async def _request(self, method: str, jwt: str, path: str) -> Any:
+    async def post(self, jwt: str, path: str, body: dict[str, Any]) -> Any:
+        return await self._request("POST", jwt, path, json=body)
+
+    async def _request(
+        self, method: str, jwt: str, path: str, json: dict[str, Any] | None = None
+    ) -> Any:
         try:
             response = await self._http_client.request(
                 method,
                 f"{self._base_url}{path}",
                 headers={"Authorization": f"Bearer {jwt}"},
+                json=json,
             )
         except httpx.TransportError as exc:
             logger.warning("nojo_api_failed path=%s reason=transport", path)
@@ -35,12 +41,13 @@ class NojoClient:
                 f"The Nojo platform API is unreachable ({path})."
             ) from exc
 
-        if response.status_code != 200:
+        if not response.is_success:
             logger.warning(
                 "nojo_api_failed path=%s status_code=%s", path, response.status_code
             )
             raise NojoAPIRequestError(
-                f"The Nojo platform API returned {response.status_code} for {path}."
+                f"The Nojo platform API returned {response.status_code} for {path}.",
+                status_code=response.status_code,
             )
 
         try:

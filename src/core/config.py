@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     resource_server_url: str = Field(alias="NOJO_RESOURCE_SERVER_URL")
     nojo_api_base_url: str = Field(alias="NOJO_API_BASE_URL")
     farms_overview_path: str = Field(alias="NOJO_FARMS_OVERVIEW_PATH", min_length=1)
+    farms_path: str = Field(alias="NOJO_FARMS_PATH", min_length=1)
     farm_path: str = Field(alias="NOJO_FARM_PATH", pattern=r"\{farm_id\}")
 
     token_exchange_url: str = Field(alias="TOKEN_EXCHANGE_URL")

@@ -88,9 +88,16 @@ async def test_registered_tools(build_test_app, backend, mode):
         "list_stations",
         "get_farms_and_crops_ids",
         "delete_farm",
+        "add_farm",
     }
     schemas = {tool.name: tool.input_schema for tool in tools}
     assert schemas.pop("delete_farm")["required"] == ["farm_id"]
+    assert set(schemas.pop("add_farm")["required"]) == {
+        "name",
+        "farm_type",
+        "latitude",
+        "longitude",
+    }
     assert all(schema.get("properties", {}) == {} for schema in schemas.values())
 
 

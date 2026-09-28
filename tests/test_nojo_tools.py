@@ -106,3 +106,80 @@ async def test_delete_farm_is_marked_destructive(build_test_app, backend):
     assert annotations.destructive_hint is True
     assert annotations.read_only_hint is False
     assert tools["get_farms_and_crops_ids"].annotations.read_only_hint is True
+
+
+CREATED_FARM = {
+    "id": FARM_ID,
+    "name": "North Field",
+    "farmType": "Greenhouse",
+    "latitude": 30.0444,
+    "longitude": 31.2357,
+}
+ADD_FARM_ARGS = {
+    "name": "  North Field ",
+    "farm_type": "Greenhouse",
+    "latitude": 30.0444,
+    "longitude": 31.2357,
+}
+
+
+async def test_add_farm_posts_exactly_the_four_fields(build_test_app, backend):
+    backend.platform_responses["/api/farms"] = (201, CREATED_FARM)
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("add_farm", ADD_FARM_ARGS)
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == CREATED_FARM
+    request = backend.platform_requests[0]
+    assert request.method == "POST"
+    assert request.url.path == "/api/farms"
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+    assert json.loads(request.content) == {
+        "name": "North Field",
+        "farmType": "Greenhouse",
+        "latitude": 30.0444,
+        "longitude": 31.2357,
+    }
+
+
+async def test_add_farm_400_means_the_name_already_exists(build_test_app, backend):
+    backend.platform_responses["/api/farms"] = (400, {"message": "exists"})
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("add_farm", ADD_FARM_ARGS)
+
+    assert result.is_error
+    assert "already exists" in result.content[0].text
+
+
+async def test_add_farm_other_backend_errors_are_tool_errors(build_test_app, backend):
+    backend.platform_responses["/api/farms"] = (500, {"error": "boom"})
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("add_farm", ADD_FARM_ARGS)
+
+    assert result.is_error
+    assert "already exists" not in result.content[0].text
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"name": "A"},
+        {"name": "x" * 51},
+        {"name": "   A   "},
+        {"farm_type": "Orchard"},
+        {"latitude": 91},
+        {"longitude": -181},
+    ],
+)
+async def test_add_farm_rejects_invalid_input_without_calling_the_api(
+    build_test_app, backend, override
+):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("add_farm", {**ADD_FARM_ARGS, **override})
+
+    assert result.is_error
+    assert backend.platform_requests == []

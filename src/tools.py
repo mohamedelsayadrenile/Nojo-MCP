@@ -1,15 +1,17 @@
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
+from pydantic import Field
 
 from src.core.config import Settings
 from src.helpers import farms_and_crops
 from src.services.auth import NojoAccessToken
+from src.services.errors import NojoAPIRequestError
 from src.services.nojo_client import NojoClient
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,14 @@ _DESTRUCTIVE = ToolAnnotations(
     idempotent_hint=False,
     open_world_hint=True,
 )
+_CREATE = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=False,
+    open_world_hint=True,
+)
+
+_NAME_MIN, _NAME_MAX = 2, 50
 
 
 def _caller() -> NojoAccessToken:
@@ -107,6 +117,46 @@ async def delete_farm(ctx: ServerContext, farm_id: str) -> dict[str, Any]:
     return {"deleted": True, "farm_id": farm_id, "message": message}
 
 
+async def add_farm(
+    ctx: ServerContext,
+    name: Annotated[str, Field(min_length=_NAME_MIN, max_length=_NAME_MAX)],
+    farm_type: Literal["Open Field", "Greenhouse"],
+    latitude: Annotated[float, Field(ge=-90, le=90)],
+    longitude: Annotated[float, Field(ge=-180, le=180)],
+) -> Any:
+    caller = _caller()
+    name = name.strip()
+    if not _NAME_MIN <= len(name) <= _NAME_MAX:
+        raise ToolError(
+            f"The farm name must be {_NAME_MIN}-{_NAME_MAX} characters. "
+            "Ask the user for a different name."
+        )
+
+    state = ctx.request_context.lifespan_context
+    body = {
+        "name": name,
+        "farmType": farm_type,
+        "latitude": latitude,
+        "longitude": longitude,
+    }
+    logger.info("farm_create_requested sub=%s farm_type=%s", caller.subject, farm_type)
+    try:
+        farm = await state.nojo_client.post(
+            caller.nojo_jwt, state.settings.farms_path, body
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400:
+            raise ToolError(
+                f"A farm named '{name}' already exists. Ask the user to choose a "
+                "different name."
+            ) from exc
+        raise
+
+    farm_id = farm.get("id") if isinstance(farm, dict) else None
+    logger.info("farm_created sub=%s farm_id=%s", caller.subject, farm_id)
+    return farm
+
+
 _DESCRIPTIONS = {
     whoami: (
         "Report which Nojo account this connection is authenticated as.\n\n"
@@ -159,9 +209,25 @@ _DELETE_FARM_DESCRIPTION = (
 )
 
 
+_ADD_FARM_DESCRIPTION = (
+    "Create a new farm for the authenticated farmer.\n\n"
+    "All four inputs are required; ask the user for any that are missing and "
+    "never guess them:\n"
+    f"- name: {_NAME_MIN}-{_NAME_MAX} characters.\n"
+    "- farm_type: exactly 'Open Field' or 'Greenhouse'.\n"
+    "- latitude / longitude: ask the user to type the farm's location (city, "
+    "village, or address), then convert it yourself to decimal degrees. If the "
+    "place is ambiguous, confirm it with the user first.\n"
+    "If the call fails because the name already exists, tell the user and ask "
+    "for another name.\n"
+    "Returns the created farm, including its id."
+)
+
+
 def register_tools(mcp: MCPServer[AppState]) -> None:
     for tool, description in _DESCRIPTIONS.items():
         mcp.tool(annotations=_READ_ONLY, description=description)(tool)
     mcp.tool(annotations=_DESTRUCTIVE, description=_DELETE_FARM_DESCRIPTION)(
         delete_farm
     )
+    mcp.tool(annotations=_CREATE, description=_ADD_FARM_DESCRIPTION)(add_farm)

@@ -21,7 +21,8 @@ as. get_current_user, list_farms, list_crops, list_alerts, and list_stations cal
 Nojo platform API on behalf of the authenticated user to report their profile, farms, \
 crops, active alerts, and IoT stations. When the user names a farm or crop, call \
 get_farms_and_crops_ids to find its id. To delete a farm, match the user's farm name to \
-that list, confirm with the user, then call delete_farm with the farmId.\
+that list, confirm with the user, then call delete_farm with the farmId. To add a farm, \
+collect its name, type, and location from the user, then call add_farm.\
 """
 
 
