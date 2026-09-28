@@ -97,11 +97,38 @@ missing required value surfaces as a pydantic `ValidationError` while uvicorn is
 
 ## Deployment
 
+The server runs as a systemd service from [`deploy/nojo-mcp.service`](deploy/nojo-mcp.service):
+installed at `/opt/nojo-mcp`, running as the `nojo` system user, listening on `127.0.0.1:8000` behind
+the reverse proxy. Edit the unit first if any of those differ on your server.
+
 ```bash
-uv sync --no-dev
-uv run uvicorn src.app:app --host 0.0.0.0 --port 8000 \
-    --proxy-headers --forwarded-allow-ips <proxy-ip>
+# One-time install
+sudo useradd --system --home-dir /opt/nojo-mcp --shell /usr/sbin/nologin nojo
+sudo git clone <repo-url> /opt/nojo-mcp
+sudo cp /opt/nojo-mcp/src/.env.example /opt/nojo-mcp/src/.env   # fill in MCP_OAUTH_CLIENT_SECRET etc.
+sudo chown -R nojo:nojo /opt/nojo-mcp
+sudo chmod 600 /opt/nojo-mcp/src/.env
+cd /opt/nojo-mcp && sudo -u nojo "$(command -v uv)" sync --no-dev --frozen
+sudo cp /opt/nojo-mcp/deploy/nojo-mcp.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now nojo-mcp
 ```
+
+Run `uv sync` as `nojo`, not root: uv links the venv to a Python it downloads into the syncing user's
+home, and the service can't read `/root` (the unit also sets `ProtectHome=true`).
+
+```bash
+sudo systemctl status nojo-mcp          # state
+sudo journalctl -u nojo-mcp -f          # logs
+curl -s http://127.0.0.1:8000/healthz   # health check
+
+# Update code, or after any src/.env change
+cd /opt/nojo-mcp && sudo -u nojo git pull && sudo -u nojo "$(command -v uv)" sync --no-dev --frozen
+sudo systemctl restart nojo-mcp
+```
+
+Keep `--workers 1`: MCP sessions live in process memory. The service restarts on failure after 5s;
+a bad `src/.env` shows up in `journalctl` as a pydantic `ValidationError`.
 
 Terminate TLS at the reverse proxy. `--proxy-headers` with `--forwarded-allow-ips` set to the
 proxy's address lets the app see the real scheme and host. `NOJO_RESOURCE_SERVER_URL` must be the

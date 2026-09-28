@@ -1,0 +1,32 @@
+# systemd unit for the Nojo MCP server.
+# Install: see "Deployment" in README.md. Adjust User, paths and port to match the server.
+
+[Unit]
+Description=Nojo MCP server (Streamable HTTP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nojo
+Group=nojo
+# Must be the repo root: the app is imported as src.app, and settings load src/.env from there.
+WorkingDirectory=/opt/nojo-mcp
+# One worker only: MCP sessions live in a per-process dict (STATELESS_HTTP=false).
+ExecStart=/opt/nojo-mcp/.venv/bin/uvicorn src.app:app \
+    --host 127.0.0.1 --port 8000 \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1 \
+    --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+Environment=PYTHONUNBUFFERED=1
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
