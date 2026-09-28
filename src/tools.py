@@ -145,6 +145,22 @@ async def delete_farm(ctx: ServerContext, farm_id: str) -> dict[str, Any]:
     return {"deleted": True, "farm_id": farm_id, "message": message}
 
 
+async def delete_crop(ctx: ServerContext, crop_id: str) -> dict[str, Any]:
+    caller = _caller()
+    crop_id = crop_id.strip()
+    if not crop_id:
+        raise ToolError("crop_id is required. Get it from get_farms_and_crops_ids.")
+
+    state = ctx.request_context.lifespan_context
+    logger.info("crop_delete_requested sub=%s crop_id=%s", caller.subject, crop_id)
+    result = await state.nojo_client.delete(
+        caller.nojo_jwt, state.settings.crop_path.format(crop_id=crop_id)
+    )
+    logger.info("crop_deleted sub=%s crop_id=%s", caller.subject, crop_id)
+    message = result.get("message") if isinstance(result, dict) else None
+    return {"deleted": True, "crop_id": crop_id, "message": message}
+
+
 async def add_farm(
     ctx: ServerContext,
     name: _Name,
@@ -278,6 +294,19 @@ _DELETE_FARM_DESCRIPTION = (
 )
 
 
+_DELETE_CROP_DESCRIPTION = (
+    "Permanently delete one crop from one of the authenticated farmer's farms.\n\n"
+    "`crop_id` must be a cropId returned by get_farms_and_crops_ids. Match the "
+    "crop the user named against both cropName and cropNameAr loosely (accept "
+    "typos and spelling variants); if the user named a farm, look only in that "
+    "farm. If the crop exists on more than one farm, ask the user which farm. If "
+    "nothing matches, tell the user and list their crops with each crop's farm. "
+    "Before calling, always ask the user to confirm, naming the crop and its farm "
+    "(e.g. 'Delete Avocado from North Field?'), and call only after they agree.\n"
+    'Returns {"deleted": true, "crop_id": str, "message": str}.'
+)
+
+
 _LOCATION_RULES = (
     "- latitude / longitude: ask the user only for the farm's location, in any "
     "form they like, as long as it includes at least the governorate or city "
@@ -326,4 +355,7 @@ def register_tools(mcp: MCPServer[AppState]) -> None:
     mcp.tool(annotations=_CREATE, description=_ADD_FARM_DESCRIPTION)(add_farm)
     mcp.tool(annotations=_IDEMPOTENT_WRITE, description=_EDIT_FARM_DESCRIPTION)(
         edit_farm
+    )
+    mcp.tool(annotations=_DESTRUCTIVE, description=_DELETE_CROP_DESCRIPTION)(
+        delete_crop
     )

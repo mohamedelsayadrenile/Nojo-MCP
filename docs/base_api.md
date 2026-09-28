@@ -27,3 +27,45 @@ it once to find the farm and crop ids the other APIs need.
 | `403` | The account is not a farmer account |
 | `429` | Too many requests — wait and retry |
 | `500` | Unexpected backend error |
+
+---
+
+Returns the three lists needed to add a crop — crop types, soil types, and
+irrigation systems — as ids and names only. When adding a crop, send `cropId`
+as `cropTypeId`, `soilId` as `soilTypeId`, and `irrigationId` as
+`irrigationSystemId`.
+
+## `GET /api/crops/options`
+
+```json
+{
+  "cropTypes": [
+    {
+      "cropId": "e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b",
+      "cropName": "Wheat",
+      "cropNameAr": "قمح"
+    }
+  ],
+  "soilTypes": [
+    {
+      "soilId": "c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f",
+      "soilName": "Clay"
+    }
+  ],
+  "irrigationSystems": [
+    {
+      "irrigationId": "d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a",
+      "irrigationName": "Drip"
+    }
+  ]
+}
+```
+### Error Responses
+
+| Status | Description |
+|---|---|
+| `200` | Success — returns the lists above |
+| `401` | Missing, expired, or invalid Nojo JWT — exchange the OAuth token again |
+| `403` | The account is not a farmer account |
+| `429` | Too many requests — wait and retry |
+| `500` | Unexpected backend error |

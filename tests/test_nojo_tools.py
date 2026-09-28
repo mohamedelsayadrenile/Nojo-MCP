@@ -261,3 +261,53 @@ async def test_edit_farm_rejects_invalid_input_without_calling_the_api(
 
     assert result.is_error
     assert backend.platform_requests == []
+
+
+CROP_ID = "b7e2d1c0-1a2b-3c4d-5e6f-7a8b9c0d1e2f"
+CROP_PATH = f"/api/crops/{CROP_ID}"
+
+
+async def test_delete_crop_sends_delete_with_the_exchanged_jwt(build_test_app, backend):
+    backend.platform_responses[CROP_PATH] = (200, {"message": "Crop deleted successfully"})
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("delete_crop", {"crop_id": f" {CROP_ID}  "})
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == {
+        "deleted": True,
+        "crop_id": CROP_ID,
+        "message": "Crop deleted successfully",
+    }
+    request = backend.platform_requests[0]
+    assert request.method == "DELETE"
+    assert request.url.path == CROP_PATH
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+
+
+async def test_delete_crop_not_found_is_a_tool_error(build_test_app, backend):
+    backend.platform_responses[CROP_PATH] = (404, {"message": "Crop not found"})
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("delete_crop", {"crop_id": CROP_ID})
+
+    assert result.is_error
+
+
+async def test_delete_crop_rejects_a_blank_id_without_calling_the_api(
+    build_test_app, backend
+):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("delete_crop", {"crop_id": "  "})
+
+    assert result.is_error
+    assert backend.platform_requests == []
+
+
+async def test_delete_crop_is_marked_destructive(build_test_app, backend):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+
+    assert tools["delete_crop"].annotations.destructive_hint is True

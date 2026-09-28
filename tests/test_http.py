@@ -90,10 +90,12 @@ async def test_registered_tools(build_test_app, backend, mode):
         "delete_farm",
         "add_farm",
         "edit_farm",
+        "delete_crop",
     }
     schemas = {tool.name: tool.input_schema for tool in tools}
     assert schemas.pop("delete_farm")["required"] == ["farm_id"]
     assert schemas.pop("edit_farm")["required"] == ["farm_id"]
+    assert schemas.pop("delete_crop")["required"] == ["crop_id"]
     assert set(schemas.pop("add_farm")["required"]) == {
         "name",
         "farm_type",
