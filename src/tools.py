@@ -39,7 +39,35 @@ _CREATE = ToolAnnotations(
     open_world_hint=True,
 )
 
+_IDEMPOTENT_WRITE = ToolAnnotations(
+    read_only_hint=False,
+    destructive_hint=False,
+    idempotent_hint=True,
+    open_world_hint=True,
+)
+
 _NAME_MIN, _NAME_MAX = 2, 50
+_Name = Annotated[str, Field(min_length=_NAME_MIN, max_length=_NAME_MAX)]
+_FarmType = Literal["Open Field", "Greenhouse"]
+_Latitude = Annotated[float, Field(ge=-90, le=90)]
+_Longitude = Annotated[float, Field(ge=-180, le=180)]
+
+
+def _clean_name(name: str) -> str:
+    name = name.strip()
+    if not _NAME_MIN <= len(name) <= _NAME_MAX:
+        raise ToolError(
+            f"The farm name must be {_NAME_MIN}-{_NAME_MAX} characters. "
+            "Ask the user for a different name."
+        )
+    return name
+
+
+def _name_taken(name: str) -> ToolError:
+    return ToolError(
+        f"A farm named '{name}' already exists. Ask the user to choose a "
+        "different name."
+    )
 
 
 def _caller() -> NojoAccessToken:
@@ -119,18 +147,13 @@ async def delete_farm(ctx: ServerContext, farm_id: str) -> dict[str, Any]:
 
 async def add_farm(
     ctx: ServerContext,
-    name: Annotated[str, Field(min_length=_NAME_MIN, max_length=_NAME_MAX)],
-    farm_type: Literal["Open Field", "Greenhouse"],
-    latitude: Annotated[float, Field(ge=-90, le=90)],
-    longitude: Annotated[float, Field(ge=-180, le=180)],
+    name: _Name,
+    farm_type: _FarmType,
+    latitude: _Latitude,
+    longitude: _Longitude,
 ) -> Any:
     caller = _caller()
-    name = name.strip()
-    if not _NAME_MIN <= len(name) <= _NAME_MAX:
-        raise ToolError(
-            f"The farm name must be {_NAME_MIN}-{_NAME_MAX} characters. "
-            "Ask the user for a different name."
-        )
+    name = _clean_name(name)
 
     state = ctx.request_context.lifespan_context
     body = {
@@ -146,14 +169,60 @@ async def add_farm(
         )
     except NojoAPIRequestError as exc:
         if exc.status_code == 400:
-            raise ToolError(
-                f"A farm named '{name}' already exists. Ask the user to choose a "
-                "different name."
-            ) from exc
+            raise _name_taken(name) from exc
         raise
 
     farm_id = farm.get("id") if isinstance(farm, dict) else None
     logger.info("farm_created sub=%s farm_id=%s", caller.subject, farm_id)
+    return farm
+
+
+async def edit_farm(
+    ctx: ServerContext,
+    farm_id: str,
+    name: _Name | None = None,
+    farm_type: _FarmType | None = None,
+    latitude: _Latitude | None = None,
+    longitude: _Longitude | None = None,
+) -> Any:
+    caller = _caller()
+    farm_id = farm_id.strip()
+    if not farm_id:
+        raise ToolError("farm_id is required. Get it from get_farms_and_crops_ids.")
+    if (latitude is None) != (longitude is None):
+        raise ToolError("latitude and longitude must be changed together.")
+
+    body: dict[str, Any] = {}
+    if name is not None:
+        body["name"] = name = _clean_name(name)
+    if farm_type is not None:
+        body["farmType"] = farm_type
+    if latitude is not None:
+        body["latitude"] = latitude
+        body["longitude"] = longitude
+    if not body:
+        raise ToolError(
+            "Nothing to change. Pass at least one of name, farm_type, or "
+            "latitude/longitude."
+        )
+
+    state = ctx.request_context.lifespan_context
+    logger.info(
+        "farm_update_requested sub=%s farm_id=%s fields=%s",
+        caller.subject,
+        farm_id,
+        ",".join(body),
+    )
+    try:
+        farm = await state.nojo_client.patch(
+            caller.nojo_jwt, state.settings.farm_path.format(farm_id=farm_id), body
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400 and name is not None:
+            raise _name_taken(name) from exc
+        raise
+
+    logger.info("farm_updated sub=%s farm_id=%s", caller.subject, farm_id)
     return farm
 
 
@@ -209,21 +278,42 @@ _DELETE_FARM_DESCRIPTION = (
 )
 
 
-_ADD_FARM_DESCRIPTION = (
-    "Create a new farm for the authenticated farmer.\n\n"
-    "All four inputs are required; ask the user for any that are missing and "
-    "never guess them:\n"
-    f"- name: {_NAME_MIN}-{_NAME_MAX} characters.\n"
-    "- farm_type: exactly 'Open Field' or 'Greenhouse'.\n"
+_LOCATION_RULES = (
     "- latitude / longitude: ask the user only for the farm's location, in any "
     "form they like, as long as it includes at least the governorate or city "
     "name. Do not mention coordinates to the user. Convert the location to "
     "decimal degrees yourself and use them directly; never show them or ask the "
     "user to confirm them. Only if you cannot recognize the location, ask the "
     "user to enter just the city name.\n"
-    "If the call fails because the name already exists, tell the user and ask "
+)
+
+_ADD_FARM_DESCRIPTION = (
+    "Create a new farm for the authenticated farmer.\n\n"
+    "All four inputs are required; ask the user for any that are missing and "
+    "never guess them:\n"
+    f"- name: {_NAME_MIN}-{_NAME_MAX} characters.\n"
+    "- farm_type: exactly 'Open Field' or 'Greenhouse'.\n"
+    + _LOCATION_RULES
+    + "If the call fails because the name already exists, tell the user and ask "
     "for another name.\n"
     "Returns the created farm, including its id."
+)
+
+_EDIT_FARM_DESCRIPTION = (
+    "Change one or more details of one of the authenticated farmer's existing "
+    "farms: its name, type, or location.\n\n"
+    "`farm_id` must be a farmId returned by get_farms_and_crops_ids: match the "
+    "farm the user named against that list loosely (accept typos and spelling "
+    "variants). If nothing matches, tell the user and list their farms.\n"
+    "Pass only the fields the user wants to change and do not ask about the "
+    "others:\n"
+    f"- name: {_NAME_MIN}-{_NAME_MAX} characters.\n"
+    "- farm_type: exactly 'Open Field' or 'Greenhouse'.\n"
+    + _LOCATION_RULES
+    + "Always pass latitude and longitude together.\n"
+    "If the call fails because the new name already exists, tell the user and "
+    "ask for another name.\n"
+    "Returns the updated farm."
 )
 
 
@@ -234,3 +324,6 @@ def register_tools(mcp: MCPServer[AppState]) -> None:
         delete_farm
     )
     mcp.tool(annotations=_CREATE, description=_ADD_FARM_DESCRIPTION)(add_farm)
+    mcp.tool(annotations=_IDEMPOTENT_WRITE, description=_EDIT_FARM_DESCRIPTION)(
+        edit_farm
+    )

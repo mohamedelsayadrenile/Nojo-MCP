@@ -22,7 +22,8 @@ Nojo platform API on behalf of the authenticated user to report their profile, f
 crops, active alerts, and IoT stations. When the user names a farm or crop, call \
 get_farms_and_crops_ids to find its id. To delete a farm, match the user's farm name to \
 that list, confirm with the user, then call delete_farm with the farmId. To add a farm, \
-collect its name, type, and location from the user, then call add_farm.\
+collect its name, type, and location from the user, then call add_farm. To change a \
+farm, resolve its farmId the same way and call edit_farm with only the changed fields.\
 """
 
 

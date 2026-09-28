@@ -183,3 +183,81 @@ async def test_add_farm_rejects_invalid_input_without_calling_the_api(
 
     assert result.is_error
     assert backend.platform_requests == []
+
+
+async def _edit(build_test_app, backend, args):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        return await client.call_tool("edit_farm", {"farm_id": FARM_ID, **args})
+
+
+@pytest.mark.parametrize(
+    "args, body",
+    [
+        ({"name": "  Alpha "}, {"name": "Alpha"}),
+        ({"farm_type": "Open Field"}, {"farmType": "Open Field"}),
+        (
+            {"latitude": 30.0131, "longitude": 31.2089},
+            {"latitude": 30.0131, "longitude": 31.2089},
+        ),
+    ],
+)
+async def test_edit_farm_patches_only_the_changed_fields(
+    build_test_app, backend, args, body
+):
+    backend.platform_responses[FARM_PATH] = (200, CREATED_FARM)
+    result = await _edit(build_test_app, backend, args)
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == CREATED_FARM
+    request = backend.platform_requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path == FARM_PATH
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+    assert json.loads(request.content) == body
+
+
+async def test_edit_farm_400_on_rename_means_the_name_already_exists(
+    build_test_app, backend
+):
+    backend.platform_responses[FARM_PATH] = (400, {"message": "exists"})
+    result = await _edit(build_test_app, backend, {"name": "Alpha"})
+
+    assert result.is_error
+    assert "already exists" in result.content[0].text
+
+
+async def test_edit_farm_400_without_a_name_is_not_a_name_clash(
+    build_test_app, backend
+):
+    backend.platform_responses[FARM_PATH] = (400, {"message": "Invalid body"})
+    result = await _edit(build_test_app, backend, {"farm_type": "Greenhouse"})
+
+    assert result.is_error
+    assert "already exists" not in result.content[0].text
+
+
+async def test_edit_farm_not_found_is_a_tool_error(build_test_app, backend):
+    backend.platform_responses[FARM_PATH] = (404, {"message": "Farm not found"})
+    result = await _edit(build_test_app, backend, {"name": "Alpha"})
+
+    assert result.is_error
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {},
+        {"latitude": 30.0},
+        {"farm_id": "  ", "name": "Alpha"},
+        {"name": "A"},
+        {"farm_type": "Orchard"},
+    ],
+)
+async def test_edit_farm_rejects_invalid_input_without_calling_the_api(
+    build_test_app, backend, args
+):
+    result = await _edit(build_test_app, backend, args)
+
+    assert result.is_error
+    assert backend.platform_requests == []

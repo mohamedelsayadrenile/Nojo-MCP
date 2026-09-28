@@ -25,6 +25,9 @@ class NojoClient:
     async def post(self, jwt: str, path: str, body: dict[str, Any]) -> Any:
         return await self._request("POST", jwt, path, json=body)
 
+    async def patch(self, jwt: str, path: str, body: dict[str, Any]) -> Any:
+        return await self._request("PATCH", jwt, path, json=body)
+
     async def _request(
         self, method: str, jwt: str, path: str, json: dict[str, Any] | None = None
     ) -> Any:
