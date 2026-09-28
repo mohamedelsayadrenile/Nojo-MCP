@@ -94,6 +94,9 @@ async def test_registered_tools(build_test_app, backend, mode):
         "get_crop_options",
         "create_crop",
         "edit_crop",
+        "get_current_weather",
+        "get_forecasting_weather",
+        "get_past_weather",
     }
     schemas = {tool.name: tool.input_schema for tool in tools}
     assert schemas.pop("delete_farm")["required"] == ["farm_id"]
@@ -116,7 +119,11 @@ async def test_registered_tools(build_test_app, backend, mode):
         "latitude",
         "longitude",
     }
+    assert schemas.pop("get_current_weather")["properties"].keys() == {"farm_id"}
+    assert schemas.pop("get_forecasting_weather")["properties"].keys() == {"farm_id"}
+    assert schemas.pop("get_past_weather")["properties"].keys() == {"days", "farm_id"}
     assert all(schema.get("properties", {}) == {} for schema in schemas.values())
+    assert all("required" not in schema for schema in schemas.values())
 
 
 async def test_whoami_reports_the_exchanged_subject(build_test_app, backend):

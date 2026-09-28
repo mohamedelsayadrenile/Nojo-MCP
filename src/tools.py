@@ -129,6 +129,46 @@ async def get_farms_and_crops_ids(ctx: ServerContext) -> list[dict[str, Any]]:
     )
 
 
+def _farm_params(farm_id: str | None) -> dict[str, str]:
+    farm_id = (farm_id or "").strip()
+    return {"farmId": farm_id} if farm_id else {}
+
+
+async def _weather(ctx: ServerContext, path: str, params: dict[str, Any]) -> Any:
+    caller = _caller()
+    logger.info(
+        "weather_requested sub=%s path=%s farm_id=%s",
+        caller.subject,
+        path,
+        params.get("farmId", "all"),
+    )
+    nojo_client = ctx.request_context.lifespan_context.nojo_client
+    return await nojo_client.get(caller.nojo_jwt, path, params)
+
+
+async def get_current_weather(ctx: ServerContext, farm_id: str | None = None) -> Any:
+    settings = ctx.request_context.lifespan_context.settings
+    return await _weather(ctx, settings.weather_current_path, _farm_params(farm_id))
+
+
+async def get_forecasting_weather(
+    ctx: ServerContext, farm_id: str | None = None
+) -> Any:
+    settings = ctx.request_context.lifespan_context.settings
+    return await _weather(ctx, settings.weather_forecast_path, _farm_params(farm_id))
+
+
+async def get_past_weather(
+    ctx: ServerContext,
+    days: Annotated[int, Field(ge=1, le=7)] = 7,
+    farm_id: str | None = None,
+) -> Any:
+    settings = ctx.request_context.lifespan_context.settings
+    return await _weather(
+        ctx, settings.weather_history_path, {"days": days, **_farm_params(farm_id)}
+    )
+
+
 async def get_crop_options(ctx: ServerContext) -> dict[str, Any]:
     caller = _caller()
     state = ctx.request_context.lifespan_context
@@ -418,6 +458,19 @@ async def edit_farm(
     return farm
 
 
+_WEATHER_RULES = (
+    "If the user has not said which farm (or all farms), ask them first: one "
+    "specific farm, or all their farms? For one farm, resolve its farmId with "
+    "get_farms_and_crops_ids, matching the name loosely (accept typos); if "
+    "nothing matches, tell the user and list their farms. For all farms, omit "
+    "farm_id: the result is then a list with one row per farm, otherwise a "
+    "single row.\n"
+    "Greenhouse farms have no wind or rain values. A null value, or an empty "
+    "`days` list, means there is no data: tell the user so and never guess. "
+    "`source` is 'device' (the farm's own device) or 'model' (weather forecast "
+    "model)."
+)
+
 _DESCRIPTIONS = {
     whoami: (
         "Report which Nojo account this connection is authenticated as.\n\n"
@@ -455,6 +508,28 @@ _DESCRIPTIONS = {
         "cropName and cropNameAr. If a choice is not in these lists, refuse: tell "
         "the user it is not available and show the available options. Never "
         "invent an id."
+    ),
+    get_current_weather: (
+        "Get the weather right now for the authenticated farmer's farms: "
+        "temperature (°C), humidity (%), and solar radiation (W/m²); open-field "
+        "farms also get wind speed (m/s) and today's rain so far (mm).\n\n"
+        + _WEATHER_RULES
+    ),
+    get_forecasting_weather: (
+        "Get the daily weather forecast for the next 7 days, today first, for the "
+        "authenticated farmer's farms. Each day has date (YYYY-MM-DD), maxTemp / "
+        "minTemp (°C), average humidity (%), and total solarRadiation (MJ/m²); "
+        "open-field farms also get the day's highest windSpeed (m/s) and total "
+        "rain (mm). Pick the right day by date for questions like 'tomorrow' or "
+        "'this weekend'.\n\n" + _WEATHER_RULES
+    ),
+    get_past_weather: (
+        "Get the daily weather of past days for the authenticated farmer's farms. "
+        "`days` is how many days back, 1-7 (1 = yesterday only, default 7); days "
+        "are oldest first, end with yesterday, and never include today. Map the "
+        "user's request to days (e.g. 'last 3 days' -> 3). If they ask for more "
+        "than 7 days, tell them only the last 7 days are available. Same fields "
+        "and units per day as get_forecasting_weather.\n\n" + _WEATHER_RULES
     ),
     get_farms_and_crops_ids: (
         "List the authenticated farmer's farms and the crops on each, as names "

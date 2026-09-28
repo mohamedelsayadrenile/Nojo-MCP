@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     crop_path: str = Field(alias="NOJO_CROP_PATH", pattern=r"\{crop_id\}")
     crops_path: str = Field(alias="NOJO_CROPS_PATH", min_length=1)
     crop_options_path: str = Field(alias="NOJO_CROP_OPTIONS_PATH", min_length=1)
+    weather_current_path: str = Field(alias="NOJO_WEATHER_CURRENT_PATH", min_length=1)
+    weather_forecast_path: str = Field(
+        alias="NOJO_WEATHER_FORECAST_PATH", min_length=1
+    )
+    weather_history_path: str = Field(alias="NOJO_WEATHER_HISTORY_PATH", min_length=1)
 
     token_exchange_url: str = Field(alias="TOKEN_EXCHANGE_URL")
     mcp_oauth_client_id: str = Field(alias="MCP_OAUTH_CLIENT_ID")

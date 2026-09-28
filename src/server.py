@@ -28,7 +28,10 @@ To delete a crop, match it to a cropId from get_farms_and_crops_ids, confirm wit
 user, then call delete_crop. To add a crop, resolve the farm with \
 get_farms_and_crops_ids and the crop type, soil type, and irrigation system with \
 get_crop_options, ask the user for the rest, then call create_crop. To change a crop, \
-resolve its cropId the same way and call edit_crop with only the changed fields.\
+resolve its cropId the same way and call edit_crop with only the changed fields. \
+For weather, ask the user which farm or all farms if they have not said, resolve a \
+named farm with get_farms_and_crops_ids, then call get_current_weather, \
+get_forecasting_weather, or get_past_weather.\
 """
 
 

@@ -492,3 +492,73 @@ async def test_edit_crop_rejects_invalid_input_without_calling_the_api(
 
     assert result.is_error
     assert backend.platform_requests == []
+
+
+WEATHER_TOOLS = {
+    "get_current_weather": ("/api/weather/overview", {}),
+    "get_forecasting_weather": ("/api/weather/overview/forecast", {}),
+    "get_past_weather": ("/api/weather/overview/history", {"days": "7"}),
+}
+
+
+@pytest.mark.parametrize("tool, path, query", [(k, *v) for k, v in WEATHER_TOOLS.items()])
+async def test_weather_for_all_farms_sends_no_farm_id(
+    build_test_app, backend, tool, path, query
+):
+    backend.platform_responses[path] = (200, [{"farmId": FARM_ID}])
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool(tool, {})
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == {"farmId": FARM_ID}
+    request = backend.platform_requests[0]
+    assert request.method == "GET"
+    assert request.url.path == path
+    assert dict(request.url.params) == query
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+
+
+@pytest.mark.parametrize("tool, path, query", [(k, *v) for k, v in WEATHER_TOOLS.items()])
+async def test_weather_for_one_farm_sends_its_farm_id(
+    build_test_app, backend, tool, path, query
+):
+    row = {"farmId": FARM_ID, "farmName": "North Farm"}
+    backend.platform_responses[path] = (200, row)
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool(tool, {"farm_id": f" {FARM_ID} "})
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == row
+    assert dict(backend.platform_requests[0].url.params) == {**query, "farmId": FARM_ID}
+
+
+@pytest.mark.parametrize("tool, path", [(k, v[0]) for k, v in WEATHER_TOOLS.items()])
+async def test_weather_unknown_farm_is_a_tool_error(build_test_app, backend, tool, path):
+    backend.platform_responses[path] = (404, {"message": "Farm not found"})
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool(tool, {"farm_id": FARM_ID})
+
+    assert result.is_error
+
+
+async def test_past_weather_sends_the_requested_days(build_test_app, backend):
+    backend.platform_responses["/api/weather/overview/history"] = (200, [])
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("get_past_weather", {"days": 3})
+
+    assert not result.is_error
+    assert dict(backend.platform_requests[0].url.params) == {"days": "3"}
+
+
+@pytest.mark.parametrize("days", [0, 8])
+async def test_past_weather_rejects_days_out_of_range(build_test_app, backend, days):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("get_past_weather", {"days": days})
+
+    assert result.is_error
+    assert backend.platform_requests == []

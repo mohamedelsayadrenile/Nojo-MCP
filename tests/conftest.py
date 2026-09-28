@@ -14,6 +14,9 @@ FARM_PATH = "/farms/{farm_id}"
 CROP_PATH = "/crops/{crop_id}"
 CROPS_PATH = "/crops"
 CROP_OPTIONS_PATH = "/crops/options"
+WEATHER_CURRENT_PATH = "/weather/overview"
+WEATHER_FORECAST_PATH = "/weather/overview/forecast"
+WEATHER_HISTORY_PATH = "/weather/overview/history"
 MCP_CLIENT_ID = "nojo-mcp"
 MCP_CLIENT_SECRET = "test-client-secret"
 
@@ -26,6 +29,9 @@ os.environ.setdefault("NOJO_FARM_PATH", FARM_PATH)
 os.environ.setdefault("NOJO_CROP_PATH", CROP_PATH)
 os.environ.setdefault("NOJO_CROPS_PATH", CROPS_PATH)
 os.environ.setdefault("NOJO_CROP_OPTIONS_PATH", CROP_OPTIONS_PATH)
+os.environ.setdefault("NOJO_WEATHER_CURRENT_PATH", WEATHER_CURRENT_PATH)
+os.environ.setdefault("NOJO_WEATHER_FORECAST_PATH", WEATHER_FORECAST_PATH)
+os.environ.setdefault("NOJO_WEATHER_HISTORY_PATH", WEATHER_HISTORY_PATH)
 os.environ.setdefault("ALLOWED_HOSTS", "testserver")
 os.environ.setdefault("TOKEN_EXCHANGE_URL", TOKEN_EXCHANGE_URL)
 os.environ.setdefault("MCP_OAUTH_CLIENT_ID", MCP_CLIENT_ID)
@@ -90,6 +96,9 @@ def make_settings(**overrides: Any) -> Settings:
         "NOJO_CROP_PATH": CROP_PATH,
         "NOJO_CROPS_PATH": CROPS_PATH,
         "NOJO_CROP_OPTIONS_PATH": CROP_OPTIONS_PATH,
+        "NOJO_WEATHER_CURRENT_PATH": WEATHER_CURRENT_PATH,
+        "NOJO_WEATHER_FORECAST_PATH": WEATHER_FORECAST_PATH,
+        "NOJO_WEATHER_HISTORY_PATH": WEATHER_HISTORY_PATH,
         "ALLOWED_HOSTS": ["testserver"],
         "TOKEN_EXCHANGE_URL": TOKEN_EXCHANGE_URL,
         "MCP_OAUTH_CLIENT_ID": MCP_CLIENT_ID,
