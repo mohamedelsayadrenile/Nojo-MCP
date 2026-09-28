@@ -502,10 +502,13 @@ FARM_SCOPED_TOOLS = {
     "get_past_irrigation": ("/api/irrigation/overview/history", {"days": "7"}),
     "get_current_alerts": ("/api/alerts/overview", {}),
     "get_past_alerts": ("/api/alerts/overview/history", {}),
+    "get_current_vpd": ("/api/agronomy/vpd/overview", {}),
+    "get_past_vpd": ("/api/agronomy/vpd/overview/history", {"days": "1"}),
 }
 PAST_TOOLS = {
     "get_past_weather": "/api/weather/overview/history",
     "get_past_irrigation": "/api/irrigation/overview/history",
+    "get_past_vpd": "/api/agronomy/vpd/overview/history",
 }
 
 

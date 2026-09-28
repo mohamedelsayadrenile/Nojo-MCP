@@ -224,6 +224,23 @@ async def get_past_alerts(
     )
 
 
+async def get_current_vpd(ctx: ServerContext, farm_id: str | None = None) -> Any:
+    settings = ctx.request_context.lifespan_context.settings
+    return await _farm_scoped(ctx, settings.vpd_current_path, _farm_params(farm_id))
+
+
+async def get_past_vpd(
+    ctx: ServerContext,
+    days: _PastDays = 1,
+    farm_id: str | None = None,
+) -> Any:
+    _check_past_days(days)
+    settings = ctx.request_context.lifespan_context.settings
+    return await _farm_scoped(
+        ctx, settings.vpd_history_path, {"days": days, **_farm_params(farm_id)}
+    )
+
+
 async def get_crop_options(ctx: ServerContext) -> dict[str, Any]:
     caller = _caller()
     state = ctx.request_context.lifespan_context
@@ -530,12 +547,22 @@ _WEATHER_RULES = (
     "farm's own device) or 'model' (weather forecast model)."
 )
 
-_PAST_DAYS_RULES = (
-    f"`days` is how many days back, 1-{_PAST_DAYS_MAX} (1 = yesterday only, "
-    f"default {_PAST_DAYS_MAX}); days are oldest first, end with yesterday, and "
-    "never include today. Map the user's request to days (e.g. 'last 3 days' -> "
-    f"3). More than {_PAST_DAYS_MAX} days is not allowed: if the user asks for "
-    f"more, tell them only the last {_PAST_DAYS_MAX} days are available."
+def _past_days_rules(default: int) -> str:
+    return (
+        f"`days` is how many days back, 1-{_PAST_DAYS_MAX} (1 = yesterday only, "
+        f"default {default}); days are oldest first, end with yesterday, and "
+        "never include today. Map the user's request to days (e.g. 'last 3 days' "
+        f"-> 3). More than {_PAST_DAYS_MAX} days is not allowed: if the user asks "
+        f"for more, tell them only the last {_PAST_DAYS_MAX} days are available."
+    )
+
+
+_VPD_STATUS = (
+    "VPD (vapour pressure deficit, kPa) is how dry the air is for the plants. "
+    "`status` bands: 'Danger (Too Low - Disease Risk)' below 0.4, 'Low Stress' "
+    "0.4-0.8, 'Optimal' 0.8-1.2, 'High Stress' 1.2-1.6, 'Danger (Too High - "
+    "Wilting Risk)' above 1.6. `source` is 'device' (the farm's own device; a "
+    "greenhouse reads the air inside it) or 'model' (from the weather)."
 )
 
 _ALERT_FIELDS = (
@@ -593,6 +620,22 @@ _DESCRIPTIONS = {
         + "\n\n"
         + _FARM_SCOPE_RULES
     ),
+    get_current_vpd: (
+        "Get the VPD right now for the authenticated farmer's farms, with its "
+        "status, trend, and what to do. `trend` is 'Rising Fast', 'Rising', "
+        "'Stable', 'Falling', or 'Falling Fast'. `recommendation` is in English; "
+        "pass it on in the user's language. `temperature` (°C) and `humidity` (%) "
+        "are what VPD was calculated from; `time` is when it was read. "
+        + _VPD_STATUS
+        + "\n\n"
+        + _FARM_SCOPE_RULES
+    ),
+    get_past_vpd: (
+        "Get the average VPD and its status for each past day on the "
+        "authenticated farmer's farms, e.g. to answer 'was yesterday a stressful "
+        "day?'. " + _past_days_rules(1) + " " + _VPD_STATUS + "\n\n"
+        + _FARM_SCOPE_RULES
+    ),
     get_crop_options: (
         "List the crop types, soil types, and irrigation systems a new crop can "
         "use, as names and ids only.\n\n"
@@ -622,7 +665,7 @@ _DESCRIPTIONS = {
     ),
     get_past_weather: (
         "Get the daily weather of past days for the authenticated farmer's farms. "
-        + _PAST_DAYS_RULES
+        + _past_days_rules(_PAST_DAYS_MAX)
         + " Same fields and units per day as get_forecasting_weather.\n\n"
         + _WEATHER_RULES
     ),
@@ -645,7 +688,7 @@ _DESCRIPTIONS = {
         "on each past day: `waterMm` (mm depth over the crop's land) and `waterM3` "
         "(m³ for the whole land). There is no status for past days, so never say "
         "a past day was a skip or increase day. "
-        + _PAST_DAYS_RULES
+        + _past_days_rules(_PAST_DAYS_MAX)
         + " If the user asks about one crop, answer only for it, matching "
         "cropName, cropNameAr, or aliasCropName loosely.\n\n" + _FARM_SCOPE_RULES
     ),

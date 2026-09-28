@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     )
     alerts_current_path: str = Field(alias="NOJO_ALERTS_CURRENT_PATH", min_length=1)
     alerts_history_path: str = Field(alias="NOJO_ALERTS_HISTORY_PATH", min_length=1)
+    vpd_current_path: str = Field(alias="NOJO_VPD_CURRENT_PATH", min_length=1)
+    vpd_history_path: str = Field(alias="NOJO_VPD_HISTORY_PATH", min_length=1)
 
     token_exchange_url: str = Field(alias="TOKEN_EXCHANGE_URL")
     mcp_oauth_client_id: str = Field(alias="MCP_OAUTH_CLIENT_ID")

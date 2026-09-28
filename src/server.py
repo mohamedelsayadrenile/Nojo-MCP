@@ -29,10 +29,11 @@ user, then call delete_crop. To add a crop, resolve the farm with \
 get_farms_and_crops_ids and the crop type, soil type, and irrigation system with \
 get_crop_options, ask the user for the rest, then call create_crop. To change a crop, \
 resolve its cropId the same way and call edit_crop with only the changed fields. \
-For weather, irrigation, and alerts, ask the user which farm or all farms if they \
+For weather, irrigation, alerts, and VPD, ask the user which farm or all farms if they \
 have not said, resolve a named farm with get_farms_and_crops_ids, then call \
 get_current_weather, get_forecasting_weather, get_past_weather, \
-get_current_irrigation, get_past_irrigation, get_current_alerts, or get_past_alerts.\
+get_current_irrigation, get_past_irrigation, get_current_alerts, get_past_alerts, \
+get_current_vpd, or get_past_vpd.\
 """
 
 
