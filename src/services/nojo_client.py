@@ -17,9 +17,17 @@ class NojoClient:
         self._base_url = settings.nojo_api_base_url
 
     async def get(self, jwt: str, path: str) -> Any:
+        return await self._request("GET", jwt, path)
+
+    async def delete(self, jwt: str, path: str) -> Any:
+        return await self._request("DELETE", jwt, path)
+
+    async def _request(self, method: str, jwt: str, path: str) -> Any:
         try:
-            response = await self._http_client.get(
-                f"{self._base_url}{path}", headers={"Authorization": f"Bearer {jwt}"}
+            response = await self._http_client.request(
+                method,
+                f"{self._base_url}{path}",
+                headers={"Authorization": f"Bearer {jwt}"},
             )
         except httpx.TransportError as exc:
             logger.warning("nojo_api_failed path=%s reason=transport", path)

@@ -86,8 +86,12 @@ async def test_registered_tools(build_test_app, backend, mode):
         "list_crops",
         "list_alerts",
         "list_stations",
+        "get_farms_and_crops_ids",
+        "delete_farm",
     }
-    assert all(tool.input_schema.get("properties", {}) == {} for tool in tools)
+    schemas = {tool.name: tool.input_schema for tool in tools}
+    assert schemas.pop("delete_farm")["required"] == ["farm_id"]
+    assert all(schema.get("properties", {}) == {} for schema in schemas.values())
 
 
 async def test_whoami_reports_the_exchanged_subject(build_test_app, backend):

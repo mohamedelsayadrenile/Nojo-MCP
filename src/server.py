@@ -19,7 +19,9 @@ INSTRUCTIONS = """\
 The Nojo MCP server. whoami reports which Nojo account the connection is authenticated \
 as. get_current_user, list_farms, list_crops, list_alerts, and list_stations call the \
 Nojo platform API on behalf of the authenticated user to report their profile, farms, \
-crops, active alerts, and IoT stations.\
+crops, active alerts, and IoT stations. When the user names a farm or crop, call \
+get_farms_and_crops_ids to find its id. To delete a farm, match the user's farm name to \
+that list, confirm with the user, then call delete_farm with the farmId.\
 """
 
 
@@ -44,7 +46,7 @@ def build_server(settings: Settings) -> MCPServer[AppState]:
             settings.resource_server_url,
         )
         try:
-            yield AppState(nojo_client=NojoClient(client, settings))
+            yield AppState(nojo_client=NojoClient(client, settings), settings=settings)
         finally:
             verifier.http_client = None
             await client.aclose()
