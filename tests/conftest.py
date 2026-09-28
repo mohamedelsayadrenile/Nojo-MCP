@@ -8,12 +8,14 @@ ISSUER_URL = "https://auth.nojo.test"
 RESOURCE_SERVER_URL = "http://testserver/mcp"
 API_BASE_URL = "https://api.nojo.test/api"
 TOKEN_EXCHANGE_URL = f"{ISSUER_URL}/oauth/token"
+FARMS_OVERVIEW_PATH = "/farms/overview"
 MCP_CLIENT_ID = "nojo-mcp"
 MCP_CLIENT_SECRET = "test-client-secret"
 
 os.environ.setdefault("NOJO_ISSUER_URL", ISSUER_URL)
 os.environ.setdefault("NOJO_RESOURCE_SERVER_URL", RESOURCE_SERVER_URL)
 os.environ.setdefault("NOJO_API_BASE_URL", API_BASE_URL)
+os.environ.setdefault("NOJO_FARMS_OVERVIEW_PATH", FARMS_OVERVIEW_PATH)
 os.environ.setdefault("ALLOWED_HOSTS", "testserver")
 os.environ.setdefault("TOKEN_EXCHANGE_URL", TOKEN_EXCHANGE_URL)
 os.environ.setdefault("MCP_OAUTH_CLIENT_ID", MCP_CLIENT_ID)
@@ -72,6 +74,7 @@ def make_settings(**overrides: Any) -> Settings:
         "NOJO_ISSUER_URL": ISSUER_URL,
         "NOJO_RESOURCE_SERVER_URL": RESOURCE_SERVER_URL,
         "NOJO_API_BASE_URL": API_BASE_URL,
+        "NOJO_FARMS_OVERVIEW_PATH": FARMS_OVERVIEW_PATH,
         "ALLOWED_HOSTS": ["testserver"],
         "TOKEN_EXCHANGE_URL": TOKEN_EXCHANGE_URL,
         "MCP_OAUTH_CLIENT_ID": MCP_CLIENT_ID,

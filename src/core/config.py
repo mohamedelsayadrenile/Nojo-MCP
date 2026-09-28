@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     issuer_url: str = Field(alias="NOJO_ISSUER_URL")
     resource_server_url: str = Field(alias="NOJO_RESOURCE_SERVER_URL")
     nojo_api_base_url: str = Field(alias="NOJO_API_BASE_URL")
+    farms_overview_path: str = Field(alias="NOJO_FARMS_OVERVIEW_PATH", min_length=1)
 
     token_exchange_url: str = Field(alias="TOKEN_EXCHANGE_URL")
     mcp_oauth_client_id: str = Field(alias="MCP_OAUTH_CLIENT_ID")
