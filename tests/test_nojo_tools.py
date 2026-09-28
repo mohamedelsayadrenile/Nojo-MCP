@@ -494,15 +494,23 @@ async def test_edit_crop_rejects_invalid_input_without_calling_the_api(
     assert backend.platform_requests == []
 
 
-WEATHER_TOOLS = {
+FARM_SCOPED_TOOLS = {
     "get_current_weather": ("/api/weather/overview", {}),
     "get_forecasting_weather": ("/api/weather/overview/forecast", {}),
     "get_past_weather": ("/api/weather/overview/history", {"days": "7"}),
+    "get_current_irrigation": ("/api/irrigation/overview", {}),
+    "get_past_irrigation": ("/api/irrigation/overview/history", {"days": "7"}),
+}
+PAST_TOOLS = {
+    "get_past_weather": "/api/weather/overview/history",
+    "get_past_irrigation": "/api/irrigation/overview/history",
 }
 
 
-@pytest.mark.parametrize("tool, path, query", [(k, *v) for k, v in WEATHER_TOOLS.items()])
-async def test_weather_for_all_farms_sends_no_farm_id(
+@pytest.mark.parametrize(
+    "tool, path, query", [(k, *v) for k, v in FARM_SCOPED_TOOLS.items()]
+)
+async def test_farm_data_for_all_farms_sends_no_farm_id(
     build_test_app, backend, tool, path, query
 ):
     backend.platform_responses[path] = (200, [{"farmId": FARM_ID}])
@@ -519,8 +527,10 @@ async def test_weather_for_all_farms_sends_no_farm_id(
     assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
 
 
-@pytest.mark.parametrize("tool, path, query", [(k, *v) for k, v in WEATHER_TOOLS.items()])
-async def test_weather_for_one_farm_sends_its_farm_id(
+@pytest.mark.parametrize(
+    "tool, path, query", [(k, *v) for k, v in FARM_SCOPED_TOOLS.items()]
+)
+async def test_farm_data_for_one_farm_sends_its_farm_id(
     build_test_app, backend, tool, path, query
 ):
     row = {"farmId": FARM_ID, "farmName": "North Farm"}
@@ -534,8 +544,10 @@ async def test_weather_for_one_farm_sends_its_farm_id(
     assert dict(backend.platform_requests[0].url.params) == {**query, "farmId": FARM_ID}
 
 
-@pytest.mark.parametrize("tool, path", [(k, v[0]) for k, v in WEATHER_TOOLS.items()])
-async def test_weather_unknown_farm_is_a_tool_error(build_test_app, backend, tool, path):
+@pytest.mark.parametrize("tool, path", [(k, v[0]) for k, v in FARM_SCOPED_TOOLS.items()])
+async def test_farm_data_unknown_farm_is_a_tool_error(
+    build_test_app, backend, tool, path
+):
     backend.platform_responses[path] = (404, {"message": "Farm not found"})
     app = build_test_app()
     async with running(app), mcp_client(app, backend.grant("alice")) as client:
@@ -544,21 +556,34 @@ async def test_weather_unknown_farm_is_a_tool_error(build_test_app, backend, too
     assert result.is_error
 
 
-async def test_past_weather_sends_the_requested_days(build_test_app, backend):
-    backend.platform_responses["/api/weather/overview/history"] = (200, [])
+@pytest.mark.parametrize("tool, path", PAST_TOOLS.items())
+async def test_past_tools_send_the_requested_days(build_test_app, backend, tool, path):
+    backend.platform_responses[path] = (200, [])
     app = build_test_app()
     async with running(app), mcp_client(app, backend.grant("alice")) as client:
-        result = await client.call_tool("get_past_weather", {"days": 3})
+        result = await client.call_tool(tool, {"days": 3})
 
     assert not result.is_error
     assert dict(backend.platform_requests[0].url.params) == {"days": "3"}
 
 
-@pytest.mark.parametrize("days", [0, 8])
-async def test_past_weather_rejects_days_out_of_range(build_test_app, backend, days):
+@pytest.mark.parametrize("tool", PAST_TOOLS)
+async def test_past_tools_reject_zero_days(build_test_app, backend, tool):
     app = build_test_app()
     async with running(app), mcp_client(app, backend.grant("alice")) as client:
-        result = await client.call_tool("get_past_weather", {"days": days})
+        result = await client.call_tool(tool, {"days": 0})
 
     assert result.is_error
+    assert backend.platform_requests == []
+
+
+@pytest.mark.parametrize("days", [8, 30])
+@pytest.mark.parametrize("tool", PAST_TOOLS)
+async def test_past_tools_allow_at_most_7_days(build_test_app, backend, tool, days):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool(tool, {"days": days})
+
+    assert result.is_error
+    assert "Only the last 7 days" in result.content[0].text
     assert backend.platform_requests == []

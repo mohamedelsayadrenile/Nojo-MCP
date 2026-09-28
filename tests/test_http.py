@@ -97,6 +97,8 @@ async def test_registered_tools(build_test_app, backend, mode):
         "get_current_weather",
         "get_forecasting_weather",
         "get_past_weather",
+        "get_current_irrigation",
+        "get_past_irrigation",
     }
     schemas = {tool.name: tool.input_schema for tool in tools}
     assert schemas.pop("delete_farm")["required"] == ["farm_id"]
@@ -122,6 +124,11 @@ async def test_registered_tools(build_test_app, backend, mode):
     assert schemas.pop("get_current_weather")["properties"].keys() == {"farm_id"}
     assert schemas.pop("get_forecasting_weather")["properties"].keys() == {"farm_id"}
     assert schemas.pop("get_past_weather")["properties"].keys() == {"days", "farm_id"}
+    assert schemas.pop("get_current_irrigation")["properties"].keys() == {"farm_id"}
+    assert schemas.pop("get_past_irrigation")["properties"].keys() == {
+        "days",
+        "farm_id",
+    }
     assert all(schema.get("properties", {}) == {} for schema in schemas.values())
     assert all("required" not in schema for schema in schemas.values())
 

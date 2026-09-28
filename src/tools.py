@@ -134,10 +134,22 @@ def _farm_params(farm_id: str | None) -> dict[str, str]:
     return {"farmId": farm_id} if farm_id else {}
 
 
-async def _weather(ctx: ServerContext, path: str, params: dict[str, Any]) -> Any:
+_PAST_DAYS_MAX = 7
+_PastDays = Annotated[int, Field(ge=1)]
+
+
+def _check_past_days(days: int) -> None:
+    if days > _PAST_DAYS_MAX:
+        raise ToolError(
+            f"Only the last {_PAST_DAYS_MAX} days are available. Tell the user and "
+            f"offer the last {_PAST_DAYS_MAX} days instead."
+        )
+
+
+async def _farm_scoped(ctx: ServerContext, path: str, params: dict[str, Any]) -> Any:
     caller = _caller()
     logger.info(
-        "weather_requested sub=%s path=%s farm_id=%s",
+        "farm_data_requested sub=%s path=%s farm_id=%s",
         caller.subject,
         path,
         params.get("farmId", "all"),
@@ -148,24 +160,50 @@ async def _weather(ctx: ServerContext, path: str, params: dict[str, Any]) -> Any
 
 async def get_current_weather(ctx: ServerContext, farm_id: str | None = None) -> Any:
     settings = ctx.request_context.lifespan_context.settings
-    return await _weather(ctx, settings.weather_current_path, _farm_params(farm_id))
+    return await _farm_scoped(
+        ctx, settings.weather_current_path, _farm_params(farm_id)
+    )
 
 
 async def get_forecasting_weather(
     ctx: ServerContext, farm_id: str | None = None
 ) -> Any:
     settings = ctx.request_context.lifespan_context.settings
-    return await _weather(ctx, settings.weather_forecast_path, _farm_params(farm_id))
+    return await _farm_scoped(
+        ctx, settings.weather_forecast_path, _farm_params(farm_id)
+    )
 
 
 async def get_past_weather(
     ctx: ServerContext,
-    days: Annotated[int, Field(ge=1, le=7)] = 7,
+    days: _PastDays = _PAST_DAYS_MAX,
     farm_id: str | None = None,
 ) -> Any:
+    _check_past_days(days)
     settings = ctx.request_context.lifespan_context.settings
-    return await _weather(
+    return await _farm_scoped(
         ctx, settings.weather_history_path, {"days": days, **_farm_params(farm_id)}
+    )
+
+
+async def get_current_irrigation(
+    ctx: ServerContext, farm_id: str | None = None
+) -> Any:
+    settings = ctx.request_context.lifespan_context.settings
+    return await _farm_scoped(
+        ctx, settings.irrigation_current_path, _farm_params(farm_id)
+    )
+
+
+async def get_past_irrigation(
+    ctx: ServerContext,
+    days: _PastDays = _PAST_DAYS_MAX,
+    farm_id: str | None = None,
+) -> Any:
+    _check_past_days(days)
+    settings = ctx.request_context.lifespan_context.settings
+    return await _farm_scoped(
+        ctx, settings.irrigation_history_path, {"days": days, **_farm_params(farm_id)}
     )
 
 
@@ -458,17 +496,29 @@ async def edit_farm(
     return farm
 
 
-_WEATHER_RULES = (
+_FARM_SCOPE_RULES = (
     "If the user has not said which farm (or all farms), ask them first: one "
     "specific farm, or all their farms? For one farm, resolve its farmId with "
     "get_farms_and_crops_ids, matching the name loosely (accept typos); if "
     "nothing matches, tell the user and list their farms. For all farms, omit "
     "farm_id: the result is then a list with one row per farm, otherwise a "
     "single row.\n"
-    "Greenhouse farms have no wind or rain values. A null value, or an empty "
-    "`days` list, means there is no data: tell the user so and never guess. "
-    "`source` is 'device' (the farm's own device) or 'model' (weather forecast "
-    "model)."
+    "A null value, or an empty list, means there is no data: tell the user so "
+    "and never guess."
+)
+
+_WEATHER_RULES = (
+    _FARM_SCOPE_RULES
+    + "\nGreenhouse farms have no wind or rain values. `source` is 'device' (the "
+    "farm's own device) or 'model' (weather forecast model)."
+)
+
+_PAST_DAYS_RULES = (
+    f"`days` is how many days back, 1-{_PAST_DAYS_MAX} (1 = yesterday only, "
+    f"default {_PAST_DAYS_MAX}); days are oldest first, end with yesterday, and "
+    "never include today. Map the user's request to days (e.g. 'last 3 days' -> "
+    f"3). More than {_PAST_DAYS_MAX} days is not allowed: if the user asks for "
+    f"more, tell them only the last {_PAST_DAYS_MAX} days are available."
 )
 
 _DESCRIPTIONS = {
@@ -525,11 +575,32 @@ _DESCRIPTIONS = {
     ),
     get_past_weather: (
         "Get the daily weather of past days for the authenticated farmer's farms. "
-        "`days` is how many days back, 1-7 (1 = yesterday only, default 7); days "
-        "are oldest first, end with yesterday, and never include today. Map the "
-        "user's request to days (e.g. 'last 3 days' -> 3). If they ask for more "
-        "than 7 days, tell them only the last 7 days are available. Same fields "
-        "and units per day as get_forecasting_weather.\n\n" + _WEATHER_RULES
+        + _PAST_DAYS_RULES
+        + " Same fields and units per day as get_forecasting_weather.\n\n"
+        + _WEATHER_RULES
+    ),
+    get_current_irrigation: (
+        "Get today's irrigation plan for every crop on the authenticated farmer's "
+        "farms: whether to irrigate, how much water, and for how long.\n"
+        "Per crop: `status` is 'optimal' (irrigate the normal amount), 'increase' "
+        "(soil is dry, irrigate more), 'reduce' (soil is wet enough, irrigate "
+        "less), 'skip' (soil is very wet, no irrigation today), 'rest' (the tree "
+        "is dormant, no irrigation), or 'not_active' (not planted yet or season "
+        "ended); `waterMm` is the water depth over the crop's land (mm), `waterM3` "
+        "the same water as volume for the whole land (m³), and `runtimeHours` how "
+        "long to run the irrigation system (can be null, e.g. in a greenhouse); "
+        "`growthStage` is initial, development, mid, late, or post-harvest. If the "
+        "user asks about one crop, answer only for it, matching cropName, "
+        "cropNameAr, or aliasCropName loosely.\n\n" + _FARM_SCOPE_RULES
+    ),
+    get_past_irrigation: (
+        "Get how much water each crop on the authenticated farmer's farms needed "
+        "on each past day: `waterMm` (mm depth over the crop's land) and `waterM3` "
+        "(m³ for the whole land). There is no status for past days, so never say "
+        "a past day was a skip or increase day. "
+        + _PAST_DAYS_RULES
+        + " If the user asks about one crop, answer only for it, matching "
+        "cropName, cropNameAr, or aliasCropName loosely.\n\n" + _FARM_SCOPE_RULES
     ),
     get_farms_and_crops_ids: (
         "List the authenticated farmer's farms and the crops on each, as names "

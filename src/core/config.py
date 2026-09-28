@@ -44,6 +44,12 @@ class Settings(BaseSettings):
         alias="NOJO_WEATHER_FORECAST_PATH", min_length=1
     )
     weather_history_path: str = Field(alias="NOJO_WEATHER_HISTORY_PATH", min_length=1)
+    irrigation_current_path: str = Field(
+        alias="NOJO_IRRIGATION_CURRENT_PATH", min_length=1
+    )
+    irrigation_history_path: str = Field(
+        alias="NOJO_IRRIGATION_HISTORY_PATH", min_length=1
+    )
 
     token_exchange_url: str = Field(alias="TOKEN_EXCHANGE_URL")
     mcp_oauth_client_id: str = Field(alias="MCP_OAUTH_CLIENT_ID")
