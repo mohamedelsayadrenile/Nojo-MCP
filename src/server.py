@@ -27,7 +27,8 @@ farm, resolve its farmId the same way and call edit_farm with only the changed f
 To delete a crop, match it to a cropId from get_farms_and_crops_ids, confirm with the \
 user, then call delete_crop. To add a crop, resolve the farm with \
 get_farms_and_crops_ids and the crop type, soil type, and irrigation system with \
-get_crop_options, ask the user for the rest, then call create_crop.\
+get_crop_options, ask the user for the rest, then call create_crop. To change a crop, \
+resolve its cropId the same way and call edit_crop with only the changed fields.\
 """
 
 

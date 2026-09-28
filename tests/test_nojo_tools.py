@@ -421,3 +421,74 @@ async def test_create_crop_rejects_invalid_input_without_calling_the_api(
 
     assert result.is_error
     assert backend.platform_requests == []
+
+
+async def _edit_crop(build_test_app, backend, args):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        return await client.call_tool("edit_crop", {"crop_id": CROP_ID, **args})
+
+
+@pytest.mark.parametrize(
+    "args, body",
+    [
+        ({"alias_crop_name": " North Wheat "}, {"aliasCropName": "North Wheat"}),
+        ({"irrigation_system_id": " i-2 "}, {"irrigationSystemId": "i-2"}),
+        ({"soil_type_id": "s-2"}, {"soilTypeId": "s-2"}),
+        (
+            {"land_area": 3, "land_area_unit": "ha"},
+            {"landArea": 3, "landAreaUnit": "ha"},
+        ),
+        ({"planting_date": "2026-04-01"}, {"plantingDate": "2026-04-01"}),
+    ],
+)
+async def test_edit_crop_patches_only_the_changed_fields(
+    build_test_app, backend, args, body
+):
+    backend.platform_responses[CROP_PATH] = (200, CREATED_CROP)
+    result = await _edit_crop(build_test_app, backend, args)
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == CREATED_CROP
+    request = backend.platform_requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path == CROP_PATH
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+    assert json.loads(request.content) == body
+
+
+async def test_edit_crop_400_relays_the_backend_reason(build_test_app, backend):
+    backend.platform_responses[CROP_PATH] = (400, {"message": "Unknown soil type"})
+    result = await _edit_crop(build_test_app, backend, {"soil_type_id": "s-9"})
+
+    assert result.is_error
+    assert "Unknown soil type" in result.content[0].text
+
+
+async def test_edit_crop_not_found_is_a_tool_error(build_test_app, backend):
+    backend.platform_responses[CROP_PATH] = (404, {"message": "Crop not found"})
+    result = await _edit_crop(build_test_app, backend, {"alias_crop_name": "Wheat"})
+
+    assert result.is_error
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {},
+        {"land_area": 2},
+        {"land_area_unit": "ha"},
+        {"planting_date": (date.today() + timedelta(days=1)).isoformat()},
+        {"alias_crop_name": "123"},
+        {"land_area": 0.5, "land_area_unit": "m²"},
+        {"crop_id": "  ", "alias_crop_name": "Wheat"},
+        {"soil_type_id": ""},
+    ],
+)
+async def test_edit_crop_rejects_invalid_input_without_calling_the_api(
+    build_test_app, backend, args
+):
+    result = await _edit_crop(build_test_app, backend, args)
+
+    assert result.is_error
+    assert backend.platform_requests == []

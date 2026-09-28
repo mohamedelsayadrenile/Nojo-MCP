@@ -200,6 +200,33 @@ def _clean_alias(name: str) -> str:
     return name
 
 
+_LandArea = Annotated[float, Field(gt=0)]
+_LandAreaUnit = Literal["m²", "feddan", "ha"]
+
+
+def _check_planting_date(planting_date: date) -> None:
+    if planting_date > date.today():
+        raise ToolError(
+            "The planting date can't be in the future. Ask the user for the date "
+            "the crop was planted."
+        )
+
+
+def _check_land_area(land_area: float, land_area_unit: str) -> None:
+    if not _AREA_MIN_M2 <= land_area * _AREA_TO_M2[land_area_unit] <= _AREA_MAX_M2:
+        raise ToolError(
+            "The land area must be between 1 m² and 100,000,000 m² "
+            "(1 feddan = 4,200 m², 1 ha = 10,000 m²). Ask the user to correct it."
+        )
+
+
+def _crop_rejected(exc: NojoAPIRequestError) -> ToolError:
+    return ToolError(
+        f"Nojo rejected the crop: {exc.detail or 'invalid input'}. Tell the "
+        "user and ask them to correct it."
+    )
+
+
 async def create_crop(
     ctx: ServerContext,
     farm_id: str,
@@ -208,8 +235,8 @@ async def create_crop(
     planting_date: date,
     soil_type_id: str,
     irrigation_system_id: str,
-    land_area: Annotated[float, Field(gt=0)],
-    land_area_unit: Literal["m²", "feddan", "ha"],
+    land_area: _LandArea,
+    land_area_unit: _LandAreaUnit,
 ) -> Any:
     caller = _caller()
     farm_id = _required_id(farm_id, "farm_id", "get_farms_and_crops_ids")
@@ -219,16 +246,8 @@ async def create_crop(
         irrigation_system_id, "irrigation_system_id", "get_crop_options"
     )
     alias_crop_name = _clean_alias(alias_crop_name)
-    if planting_date > date.today():
-        raise ToolError(
-            "The planting date can't be in the future. Ask the user for the date "
-            "the crop was planted."
-        )
-    if not _AREA_MIN_M2 <= land_area * _AREA_TO_M2[land_area_unit] <= _AREA_MAX_M2:
-        raise ToolError(
-            "The land area must be between 1 m² and 100,000,000 m² "
-            "(1 feddan = 4,200 m², 1 ha = 10,000 m²). Ask the user to correct it."
-        )
+    _check_planting_date(planting_date)
+    _check_land_area(land_area, land_area_unit)
 
     state = ctx.request_context.lifespan_context
     body = {
@@ -248,16 +267,73 @@ async def create_crop(
         )
     except NojoAPIRequestError as exc:
         if exc.status_code == 400:
-            raise ToolError(
-                f"Nojo rejected the crop: {exc.detail or 'invalid input'}. Tell the "
-                "user and ask them to correct it."
-            ) from exc
+            raise _crop_rejected(exc) from exc
         raise
 
     crop_id = crop.get("id") if isinstance(crop, dict) else None
     logger.info(
         "crop_created sub=%s farm_id=%s crop_id=%s", caller.subject, farm_id, crop_id
     )
+    return crop
+
+
+async def edit_crop(
+    ctx: ServerContext,
+    crop_id: str,
+    alias_crop_name: str | None = None,
+    planting_date: date | None = None,
+    soil_type_id: str | None = None,
+    irrigation_system_id: str | None = None,
+    land_area: _LandArea | None = None,
+    land_area_unit: _LandAreaUnit | None = None,
+) -> Any:
+    caller = _caller()
+    crop_id = _required_id(crop_id, "crop_id", "get_farms_and_crops_ids")
+    if (land_area is None) != (land_area_unit is None):
+        raise ToolError("land_area and land_area_unit must be changed together.")
+
+    body: dict[str, Any] = {}
+    if alias_crop_name is not None:
+        body["aliasCropName"] = _clean_alias(alias_crop_name)
+    if planting_date is not None:
+        _check_planting_date(planting_date)
+        body["plantingDate"] = planting_date.isoformat()
+    if soil_type_id is not None:
+        body["soilTypeId"] = _required_id(
+            soil_type_id, "soil_type_id", "get_crop_options"
+        )
+    if irrigation_system_id is not None:
+        body["irrigationSystemId"] = _required_id(
+            irrigation_system_id, "irrigation_system_id", "get_crop_options"
+        )
+    if land_area is not None and land_area_unit is not None:
+        _check_land_area(land_area, land_area_unit)
+        body["landArea"] = land_area
+        body["landAreaUnit"] = land_area_unit
+    if not body:
+        raise ToolError(
+            "Nothing to change. Pass at least one of alias_crop_name, "
+            "planting_date, soil_type_id, irrigation_system_id, or "
+            "land_area/land_area_unit."
+        )
+
+    state = ctx.request_context.lifespan_context
+    logger.info(
+        "crop_update_requested sub=%s crop_id=%s fields=%s",
+        caller.subject,
+        crop_id,
+        ",".join(body),
+    )
+    try:
+        crop = await state.nojo_client.patch(
+            caller.nojo_jwt, state.settings.crop_path.format(crop_id=crop_id), body
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400:
+            raise _crop_rejected(exc) from exc
+        raise
+
+    logger.info("crop_updated sub=%s crop_id=%s", caller.subject, crop_id)
     return crop
 
 
@@ -420,6 +496,15 @@ _DELETE_CROP_DESCRIPTION = (
 )
 
 
+_CROP_INPUT_RULES = (
+    f"- alias_crop_name: the farmer's own name for this crop, {_ALIAS_MIN}-"
+    f"{_ALIAS_MAX} characters of letters, numbers, spaces, '_' or '-', with at "
+    "least one letter, not already used on the same farm.\n"
+    "- planting_date: YYYY-MM-DD, not in the future.\n"
+    "- land_area and land_area_unit ('m²', 'feddan', or 'ha'): the area must be "
+    "between 1 m² and 100,000,000 m² once converted.\n"
+)
+
 _CREATE_CROP_DESCRIPTION = (
     "Add a new crop to one of the authenticated farmer's farms.\n\n"
     "Resolve the ids first; never invent one:\n"
@@ -431,15 +516,34 @@ _CREATE_CROP_DESCRIPTION = (
     "or irrigation system is not in those lists, refuse: tell the user it is not "
     "available and show the available options.\n"
     "Ask the user for the rest and never guess them:\n"
-    f"- alias_crop_name: the farmer's own name for this crop, {_ALIAS_MIN}-"
-    f"{_ALIAS_MAX} characters of letters, numbers, spaces, '_' or '-', with at "
-    "least one letter, not already used on the same farm.\n"
-    "- planting_date: YYYY-MM-DD, not in the future.\n"
-    "- land_area and land_area_unit ('m²', 'feddan', or 'ha'): the area must be "
-    "between 1 m² and 100,000,000 m² once converted.\n"
-    "If the call is rejected, tell the user the reason and ask them to correct "
+    + _CROP_INPUT_RULES
+    + "If the call is rejected, tell the user the reason and ask them to correct "
     "it.\n"
     "Returns the created crop, including its id."
+)
+
+_EDIT_CROP_DESCRIPTION = (
+    "Change one or more details of one of the authenticated farmer's existing "
+    "crops: its name, planting date, soil type, irrigation system, or land "
+    "area.\n\n"
+    "`crop_id` must be a cropId returned by get_farms_and_crops_ids. Match the "
+    "crop the user named against both cropName and cropNameAr loosely (accept "
+    "typos and spelling variants); if the user named a farm, look only in that "
+    "farm. If the crop exists on more than one farm, ask the user which farm. If "
+    "nothing matches, tell the user and list their crops with each crop's farm.\n"
+    "A new soil_type_id (soilId) or irrigation_system_id (irrigationId) must come "
+    "from get_crop_options. If the user's soil type or irrigation system is not "
+    "in those lists, refuse: tell the user it is not available and show the "
+    "available options.\n"
+    "The crop type itself cannot be changed. If the user asks to, explain that "
+    "and suggest deleting the crop and adding a new one.\n"
+    "Pass only the fields the user wants to change and do not ask about the "
+    "others:\n"
+    + _CROP_INPUT_RULES
+    + "Always pass land_area and land_area_unit together.\n"
+    "If the call is rejected, tell the user the reason and ask them to correct "
+    "it.\n"
+    "Returns the updated crop."
 )
 
 
@@ -496,3 +600,6 @@ def register_tools(mcp: MCPServer[AppState]) -> None:
         delete_crop
     )
     mcp.tool(annotations=_CREATE, description=_CREATE_CROP_DESCRIPTION)(create_crop)
+    mcp.tool(annotations=_IDEMPOTENT_WRITE, description=_EDIT_CROP_DESCRIPTION)(
+        edit_crop
+    )

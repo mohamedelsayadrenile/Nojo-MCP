@@ -93,11 +93,13 @@ async def test_registered_tools(build_test_app, backend, mode):
         "delete_crop",
         "get_crop_options",
         "create_crop",
+        "edit_crop",
     }
     schemas = {tool.name: tool.input_schema for tool in tools}
     assert schemas.pop("delete_farm")["required"] == ["farm_id"]
     assert schemas.pop("edit_farm")["required"] == ["farm_id"]
     assert schemas.pop("delete_crop")["required"] == ["crop_id"]
+    assert schemas.pop("edit_crop")["required"] == ["crop_id"]
     assert set(schemas.pop("create_crop")["required"]) == {
         "farm_id",
         "crop_type_id",
