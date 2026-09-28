@@ -1,5 +1,6 @@
 import os
 from collections.abc import Callable, Iterator
+from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -19,9 +20,51 @@ os.environ.setdefault("MCP_OAUTH_CLIENT_ID", MCP_CLIENT_ID)
 os.environ.setdefault("MCP_OAUTH_CLIENT_SECRET", MCP_CLIENT_SECRET)
 
 import httpx  # noqa: E402
+import httpx2  # noqa: E402
 import pytest  # noqa: E402
+from mcp.client.client import Client  # noqa: E402
+from mcp.client.streamable_http import streamable_http_client  # noqa: E402
 
 from src.core.config import Settings  # noqa: E402
+
+MCP_URL = "http://testserver/mcp"
+JSON_RPC_HEADERS = {
+    "Accept": "application/json, text/event-stream",
+    "Content-Type": "application/json",
+}
+INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "http-test", "version": "1"},
+    },
+}
+
+
+@asynccontextmanager
+async def running(app):
+    async with app.router.lifespan_context(app):
+        yield app
+
+
+def raw(app, token: str | None = None) -> httpx2.AsyncClient:
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app),
+        base_url="http://testserver",
+        headers=headers,
+    )
+
+
+@asynccontextmanager
+async def mcp_client(app, token: str, **kwargs):
+    async with Client(
+        streamable_http_client(MCP_URL, http_client=raw(app, token)), **kwargs
+    ) as client:
+        yield client
 
 
 def make_settings(**overrides: Any) -> Settings:

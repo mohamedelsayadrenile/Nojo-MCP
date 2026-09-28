@@ -159,23 +159,6 @@ async def test_the_verifier_caches_a_verified_token():
     assert first.nojo_jwt == "nojo-jwt-user-1"
 
 
-async def test_forget_evicts_the_cache_entry():
-    calls = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(200, json=GOOD_BODY)
-
-    verifier = ExchangeTokenVerifier(make_settings())
-    verifier.http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-
-    await verifier.verify_token("oauth-token")
-    verifier.forget("oauth-token")
-    await verifier.verify_token("oauth-token")
-
-    assert len(calls) == 2
-
-
 async def test_an_expired_entry_is_exchanged_again():
     calls = []
 

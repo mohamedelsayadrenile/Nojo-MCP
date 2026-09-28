@@ -2,6 +2,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
@@ -11,16 +12,6 @@ from src.core.config import Settings
 from src.services.auth import ExchangeTokenVerifier
 from src.services.nojo_client import NojoClient
 from src.tools import AppState, register_tools
-import httpx
-
-
-def build_http_client(settings: Settings) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        headers={"Accept": "application/json"},
-        timeout=settings.http_timeout_seconds,
-        limits=httpx.Limits(max_connections=settings.http_max_connections),
-    )
-
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +23,14 @@ crops, active alerts, and IoT stations.\
 """
 
 
+def build_http_client(settings: Settings) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        headers={"Accept": "application/json"},
+        timeout=settings.http_timeout_seconds,
+        limits=httpx.Limits(max_connections=settings.http_max_connections),
+    )
+
+
 def build_server(settings: Settings) -> MCPServer[AppState]:
     verifier = ExchangeTokenVerifier(settings)
 
@@ -39,19 +38,13 @@ def build_server(settings: Settings) -> MCPServer[AppState]:
     async def lifespan(_: MCPServer[AppState]) -> AsyncIterator[AppState]:
         client = build_http_client(settings)
         verifier.http_client = client
-        nojo_client = NojoClient(client, settings)
         logger.info(
             "nojo_mcp_starting issuer=%s resource=%s",
             settings.issuer_url,
             settings.resource_server_url,
         )
         try:
-            yield AppState(
-                client=client,
-                settings=settings,
-                verifier=verifier,
-                nojo_client=nojo_client,
-            )
+            yield AppState(nojo_client=NojoClient(client, settings))
         finally:
             verifier.http_client = None
             await client.aclose()

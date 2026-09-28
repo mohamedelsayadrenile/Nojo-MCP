@@ -75,9 +75,6 @@ class ExchangeTokenVerifier(TokenVerifier):
         self._cache[key] = (access_token, expires_at - _EXPIRY_MARGIN_SECONDS)
         return access_token
 
-    def forget(self, token: str) -> None:
-        self._cache.pop(_cache_key(token.strip()), None)
-
     def _purge(self, now: float) -> None:
         for key in [k for k, (_, until) in self._cache.items() if until <= now]:
             del self._cache[key]

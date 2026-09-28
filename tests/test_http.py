@@ -1,57 +1,21 @@
 import base64
-from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 import httpx2
 import pytest
+
 from tests.conftest import (
+    INITIALIZE,
     ISSUER_URL,
+    JSON_RPC_HEADERS,
     MCP_CLIENT_ID,
     MCP_CLIENT_SECRET,
     RESOURCE_SERVER_URL,
     make_settings,
+    mcp_client,
+    raw,
+    running,
 )
-from mcp.client.client import Client
-from mcp.client.streamable_http import streamable_http_client
-
-MCP_URL = "http://testserver/mcp"
-JSON_RPC_HEADERS = {
-    "Accept": "application/json, text/event-stream",
-    "Content-Type": "application/json",
-}
-INITIALIZE = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "initialize",
-    "params": {
-        "protocolVersion": "2025-06-18",
-        "capabilities": {},
-        "clientInfo": {"name": "http-test", "version": "1"},
-    },
-}
-
-
-@asynccontextmanager
-async def running(app):
-    async with app.router.lifespan_context(app):
-        yield app
-
-
-def raw(app, token: str | None = None) -> httpx2.AsyncClient:
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return httpx2.AsyncClient(
-        transport=httpx2.ASGITransport(app=app),
-        base_url="http://testserver",
-        headers=headers,
-    )
-
-
-@asynccontextmanager
-async def mcp_client(app, token: str, **kwargs):
-    async with Client(
-        streamable_http_client(MCP_URL, http_client=raw(app, token)), **kwargs
-    ) as client:
-        yield client
 
 
 async def test_unauthenticated_request_challenges_with_resource_metadata(build_test_app):

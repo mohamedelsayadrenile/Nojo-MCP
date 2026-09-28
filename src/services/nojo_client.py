@@ -14,29 +14,12 @@ class NojoClient:
 
     def __init__(self, http_client: httpx.AsyncClient, settings: Settings) -> None:
         self._http_client = http_client
-        self._settings = settings
+        self._base_url = settings.nojo_api_base_url
 
-    async def get_current_user(self, jwt: str) -> Any:
-        return await self._get(jwt, "/auth/me")
-
-    async def list_farms(self, jwt: str) -> Any:
-        return await self._get(jwt, "/farms")
-
-    async def list_crops(self, jwt: str) -> Any:
-        return await self._get(jwt, "/crops")
-
-    async def list_alerts(self, jwt: str) -> Any:
-        return await self._get(jwt, "/alerts")
-
-    async def list_stations(self, jwt: str) -> Any:
-        return await self._get(jwt, "/stations")
-
-    async def _get(self, jwt: str, path: str) -> Any:
-        url = f"{self._settings.nojo_api_base_url}{path}"
-
+    async def get(self, jwt: str, path: str) -> Any:
         try:
             response = await self._http_client.get(
-                url, headers={"Authorization": f"Bearer {jwt}"}
+                f"{self._base_url}{path}", headers={"Authorization": f"Bearer {jwt}"}
             )
         except httpx.TransportError as exc:
             logger.warning("nojo_api_failed path=%s reason=transport", path)

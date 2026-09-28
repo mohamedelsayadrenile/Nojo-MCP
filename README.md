@@ -3,17 +3,20 @@
 A remote [MCP](https://modelcontextprotocol.io) server for the Nojo platform, served over
 Streamable HTTP at `https://nojo.ai/mcp`.
 
-It is currently an **OAuth bridge only**. The sign-in chain is the thing being proved; platform
-tools come later, on top of it.
-
 ## Tools
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
 | `whoami` | none | `{"subject", "client_id", "token_expires_at", "exchange": "ok"}` |
+| `get_current_user` | none | Profile from `GET /auth/me` |
+| `list_farms` | none | Farms from `GET /farms` |
+| `list_crops` | none | Crops from `GET /crops` |
+| `list_alerts` | none | Active alerts from `GET /alerts` |
+| `list_stations` | none | IoT stations from `GET /stations` |
 
 `whoami` makes no upstream call. It reports what the token exchange already established, so a
 successful call is a green light for the whole chain: discovery → authorize → token → exchange.
+The other tools call the platform API under `NOJO_API_BASE_URL` with the exchanged Nojo JWT.
 
 ## How authentication works
 
@@ -44,7 +47,7 @@ Failure modes are kept distinct on purpose. Only a dead user token earns a `401`
   client must not read an outage as "your login expired" and loop through sign-in.
 
 `/.well-known/oauth-authorization-server` and `/oauth/*` are deliberately **not** served here —
-they belong to the backend. See `MCP_APIs_Contract.md` for the endpoints the backend must provide.
+they belong to the backend. See [`docs/MCP_APIs_Contract.md`](docs/MCP_APIs_Contract.md) for the endpoints the backend must provide.
 
 ### Proxy routing (required)
 
@@ -78,6 +81,7 @@ missing required value surfaces as a pydantic `ValidationError` while uvicorn is
 | --- | --- | --- | --- |
 | `NOJO_ISSUER_URL` | yes | — | Authorization server issuer, exact string, no trailing slash |
 | `NOJO_RESOURCE_SERVER_URL` | yes | — | Public URL of this server including `/mcp`; drives the 401 challenge and the metadata route |
+| `NOJO_API_BASE_URL` | yes | — | Base URL of the Nojo platform API the tools call |
 | `TOKEN_EXCHANGE_URL` | yes | — | Backend RFC 8693 endpoint |
 | `MCP_OAUTH_CLIENT_ID` | yes | — | This server's confidential client id |
 | `MCP_OAUTH_CLIENT_SECRET` | yes | — | Its secret; keep out of version control |
@@ -85,7 +89,7 @@ missing required value surfaces as a pydantic `ValidationError` while uvicorn is
 | `ALLOWED_HOSTS` | no | empty | Host allowlist; a request for an unlisted host gets `421` |
 | `ALLOWED_ORIGINS` | no | empty | Origin allowlist |
 | `STATELESS_HTTP` | no | `false` | Set true only for multiple replicas without sticky routing |
-| `HTTP_TIMEOUT_SECONDS` | no | `15.0` | Token-exchange timeout |
+| `HTTP_TIMEOUT_SECONDS` | no | `15.0` | Outbound HTTP timeout |
 | `HTTP_MAX_CONNECTIONS` | no | `100` | Shared connection pool size |
 | `LOG_LEVEL` | no | `INFO` | |
 
@@ -94,14 +98,15 @@ missing required value surfaces as a pydantic `ValidationError` while uvicorn is
 ## Deployment
 
 ```bash
-docker build -t nojo-mcp .
-docker run -p 8000:8000 --env-file src/.env nojo-mcp
+uv sync --no-dev
+uv run uvicorn src.app:app --host 0.0.0.0 --port 8000 \
+    --proxy-headers --forwarded-allow-ips <proxy-ip>
 ```
 
-Runs as a non-root user with a `/healthz` healthcheck. Terminate TLS at the proxy and pass
-`--proxy-headers` (already in the image's `CMD`); set `FORWARDED_ALLOW_IPS` to the proxy's network
-so the app sees the real scheme and host. `NOJO_RESOURCE_SERVER_URL` must be the public HTTPS URL,
-not the internal one — clients compare it exactly.
+Terminate TLS at the reverse proxy. `--proxy-headers` with `--forwarded-allow-ips` set to the
+proxy's address lets the app see the real scheme and host. `NOJO_RESOURCE_SERVER_URL` must be the
+public HTTPS URL, not the internal one — clients compare it exactly. `/healthz` is an unauthenticated
+health check.
 
 ## Staging
 
@@ -146,12 +151,14 @@ touches the network.
 
 ```
 src/
-  app.py              ASGI app; Streamable HTTP at /mcp
-  server.py           MCP server, lifespan, /healthz
-  tools.py            AppState and the whoami tool
-  core/config.py      Settings
-  core/logging.py     Logging setup
-  services/auth.py    Token exchange and the verifier cache
-  services/http.py    Shared httpx client
-  services/errors.py  Error types
+  app.py                   ASGI app; Streamable HTTP at /mcp
+  server.py                MCP server, lifespan, /healthz
+  tools.py                 MCP tools
+  core/config.py           Settings
+  core/logging.py          Logging setup
+  services/auth.py         Token exchange and the verifier cache
+  services/nojo_client.py  Nojo platform API client
+  services/errors.py       Error types
+docs/                      Backend contract docs
+tests/
 ```

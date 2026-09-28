@@ -1,7 +1,8 @@
 import json
 
 import pytest
-from tests.test_http import mcp_client, running
+
+from tests.conftest import mcp_client, running
 
 
 TOOL_PATHS = {
