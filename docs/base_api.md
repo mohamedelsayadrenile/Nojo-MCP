@@ -69,3 +69,41 @@ as `cropTypeId`, `soilId` as `soilTypeId`, and `irrigationId` as
 | `403` | The account is not a farmer account |
 | `429` | Too many requests — wait and retry |
 | `500` | Unexpected backend error |
+
+---
+
+Returns the two lists needed to add a ledger entry — actions and categories —
+as ids and names only, the same choices as the website's add-entry form. When
+adding an entry, send `actionId` as `actionId` and `categoryId` as
+`actionTypeId`. If the chosen one is named `Other`, put the user's own name
+for it in `description` (action) or `descriptionAr` (category).
+
+## `GET /api/farmer-ledger/options`
+
+```json
+{
+  "actions": [
+    {
+      "actionId": "7e3f4a5b-6c7d-8e9f-0a1b-2c3d4e5f6a7b",
+      "name": "Purchase",
+      "nameAr": "شراء"
+    }
+  ],
+  "categories": [
+    {
+      "categoryId": "8f4a5b6c-7d8e-9f0a-1b2c-3d4e5f6a7b8c",
+      "name": "Fertilizer",
+      "nameAr": "أسمدة"
+    }
+  ]
+}
+```
+### Error Responses
+
+| Status | Description |
+|---|---|
+| `200` | Success — returns the lists above |
+| `401` | Missing, expired, or invalid Nojo JWT — exchange the OAuth token again |
+| `403` | The account is not a farmer account |
+| `429` | Too many requests — wait and retry |
+| `500` | Unexpected backend error |
