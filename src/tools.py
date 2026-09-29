@@ -1,7 +1,7 @@
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated, Any, Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -241,6 +241,52 @@ async def get_past_vpd(
     )
 
 
+_REPORT_DAYS = 7
+
+
+def _check_report_range(from_date: date, to_date: date) -> None:
+    if from_date > to_date:
+        raise ToolError("from_date must not be after to_date.")
+    today = date.today()
+    earliest = today - timedelta(days=_REPORT_DAYS - 1)
+    if from_date < earliest or to_date > today:
+        raise ToolError(
+            f"Nojo reports cover only the last {_REPORT_DAYS} days: "
+            f"{earliest.isoformat()} to {today.isoformat()} (today). Tell the user "
+            "and offer that range instead."
+        )
+
+
+async def get_farm_report(
+    ctx: ServerContext, farm_id: str, from_date: date, to_date: date
+) -> Any:
+    caller = _caller()
+    farm_id = _required_id(farm_id, "farm_id", "get_farms_and_crops_ids")
+    _check_report_range(from_date, to_date)
+
+    state = ctx.request_context.lifespan_context
+    logger.info(
+        "farm_report_requested sub=%s farm_id=%s from=%s to=%s",
+        caller.subject,
+        farm_id,
+        from_date,
+        to_date,
+    )
+    try:
+        return await state.nojo_client.get(
+            caller.nojo_jwt,
+            state.settings.farm_report_path.format(farm_id=farm_id),
+            {"from": from_date.isoformat(), "to": to_date.isoformat()},
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400:
+            raise ToolError(
+                f"Nojo rejected the report dates: {exc.detail or 'invalid dates'}. "
+                "Tell the user and offer the last 7 days (today included) instead."
+            ) from exc
+        raise
+
+
 async def get_crop_options(ctx: ServerContext) -> dict[str, Any]:
     caller = _caller()
     state = ctx.request_context.lifespan_context
@@ -449,6 +495,43 @@ async def edit_crop(
     return crop
 
 
+_FEEDBACK_MIN, _FEEDBACK_MAX = 2, 1200
+
+
+async def send_feedback(ctx: ServerContext, message: str) -> dict[str, Any]:
+    caller = _caller()
+    message = message.strip()
+    if not _FEEDBACK_MIN <= len(message) <= _FEEDBACK_MAX:
+        raise ToolError(
+            f"The feedback must be {_FEEDBACK_MIN}-{_FEEDBACK_MAX} characters "
+            f"(it is {len(message)}). Adjust it and confirm it with the user again."
+        )
+
+    state = ctx.request_context.lifespan_context
+    logger.info("feedback_requested sub=%s length=%s", caller.subject, len(message))
+    try:
+        feedback = await state.nojo_client.post(
+            caller.nojo_jwt, state.settings.feedback_path, {"message": message}
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400:
+            raise ToolError(
+                f"Nojo rejected the feedback: {exc.detail or 'invalid message'}. "
+                "Adjust it and confirm it with the user again."
+            ) from exc
+        raise
+
+    feedback = feedback if isinstance(feedback, dict) else {}
+    logger.info(
+        "feedback_sent sub=%s feedback_id=%s", caller.subject, feedback.get("id")
+    )
+    return {
+        "sent": True,
+        "feedback_id": feedback.get("id"),
+        "created_at": feedback.get("createdAt"),
+    }
+
+
 async def add_farm(
     ctx: ServerContext,
     name: _Name,
@@ -636,6 +719,33 @@ _DESCRIPTIONS = {
         "day?'. " + _past_days_rules(1) + " " + _VPD_STATUS + "\n\n"
         + _FARM_SCOPE_RULES
     ),
+    get_farm_report: (
+        "Get the report of one of the authenticated farmer's farms for a date "
+        "range: the farm's crops, and for each day the weather, the VPD, and each "
+        "crop's water need, plus the alerts of those days. It is the same data as "
+        "the PDF on the Nojo reports page.\n\n"
+        "farm_id is required: if the user has not said which farm, ask them, then "
+        "resolve its farmId with get_farms_and_crops_ids, matching the name "
+        "loosely (accept typos); if nothing matches, tell the user and list their "
+        "farms. If the user has not given the dates, ask them, suggesting the "
+        "last 7 days.\n"
+        f"Dates: reports cover only the last {_REPORT_DAYS} days including today. "
+        f"from_date can be at most {_REPORT_DAYS - 1} days ago, to_date can be "
+        "today at the latest, and from_date must not be after to_date. If the "
+        "user asks for older days (e.g. 'last month'), do not call this tool: "
+        f"tell them Nojo reports cover only the last week and offer the last "
+        f"{_REPORT_DAYS} days instead.\n"
+        "Report fields: days[].weather has maxTemp / minTemp (°C), humidity (%), "
+        "solarRadiation (MJ/m²), and for open-field farms windSpeed (m/s) and rain "
+        "(mm); days[].vpd (kPa) with vpdStatus; days[].irrigation has each crop's "
+        "waterMm (mm) and waterM3 (m³), and totalWaterM3 is all crops together. "
+        "`alerts` have the same fields as get_current_alerts; the *Ar fields hold "
+        "Arabic text, so answer in the user's language. A null value means there "
+        "is no data: say so and never guess.\n"
+        "Show the report to the user as text, then give them `reportsPageUrl` and "
+        "tell them: to download the report as a PDF file, open this link (they "
+        "pick the farm and the dates there)."
+    ),
     get_crop_options: (
         "List the crop types, soil types, and irrigation systems a new crop can "
         "use, as names and ids only.\n\n"
@@ -783,6 +893,20 @@ _EDIT_CROP_DESCRIPTION = (
 )
 
 
+_SEND_FEEDBACK_DESCRIPTION = (
+    "Send the user's feedback to the Nojo team, who receive it by email: a "
+    "problem they found, a suggestion, or anything else they want to tell "
+    "Nojo.\n\n"
+    "Write `message` as a clear note in the user's own words and language, "
+    "keeping their details (which page, farm, or crop). It must be "
+    f"{_FEEDBACK_MIN}-{_FEEDBACK_MAX} characters. Never include passwords or "
+    "other secrets. Before calling, show the user the exact text and ask them to "
+    "confirm; call only after they agree. After it is sent, tell the user the "
+    "Nojo team received it.\n"
+    'Returns {"sent": true, "feedback_id": str, "created_at": str}.'
+)
+
+
 _LOCATION_RULES = (
     "- latitude / longitude: ask the user only for the farm's location, in any "
     "form they like, as long as it includes at least the governorate or city "
@@ -836,6 +960,9 @@ def register_tools(mcp: MCPServer[AppState]) -> None:
         delete_crop
     )
     mcp.tool(annotations=_CREATE, description=_CREATE_CROP_DESCRIPTION)(create_crop)
+    mcp.tool(annotations=_CREATE, description=_SEND_FEEDBACK_DESCRIPTION)(
+        send_feedback
+    )
     mcp.tool(annotations=_IDEMPOTENT_WRITE, description=_EDIT_CROP_DESCRIPTION)(
         edit_crop
     )

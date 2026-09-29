@@ -617,3 +617,148 @@ async def test_past_alerts_rejects_other_days(build_test_app, backend):
 
     assert result.is_error
     assert backend.platform_requests == []
+
+
+REPORT_PATH = f"/api/reports/farm/{FARM_ID}/summary"
+REPORT = {"farmId": FARM_ID, "reportsPageUrl": "https://nojo.ai/reports", "days": []}
+
+
+def _days_ago(n: int) -> str:
+    return (date.today() - timedelta(days=n)).isoformat()
+
+
+async def _report(build_test_app, backend, args):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        return await client.call_tool(
+            "get_farm_report", {"farm_id": FARM_ID, **args}
+        )
+
+
+@pytest.mark.parametrize("start, end", [(6, 0), (1, 1)])
+async def test_farm_report_sends_the_farm_and_dates(build_test_app, backend, start, end):
+    backend.platform_responses[REPORT_PATH] = (200, REPORT)
+    result = await _report(
+        build_test_app,
+        backend,
+        {
+            "farm_id": f" {FARM_ID} ",
+            "from_date": _days_ago(start),
+            "to_date": _days_ago(end),
+        },
+    )
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == REPORT
+    request = backend.platform_requests[0]
+    assert request.method == "GET"
+    assert request.url.path == REPORT_PATH
+    assert dict(request.url.params) == {"from": _days_ago(start), "to": _days_ago(end)}
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+
+
+async def test_farm_report_400_relays_the_backend_reason(build_test_app, backend):
+    backend.platform_responses[REPORT_PATH] = (400, {"message": "to is after today"})
+    result = await _report(
+        build_test_app, backend, {"from_date": _days_ago(1), "to_date": _days_ago(0)}
+    )
+
+    assert result.is_error
+    assert "to is after today" in result.content[0].text
+
+
+async def test_farm_report_not_found_is_a_tool_error(build_test_app, backend):
+    backend.platform_responses[REPORT_PATH] = (404, {"message": "Farm not found"})
+    result = await _report(
+        build_test_app, backend, {"from_date": _days_ago(1), "to_date": _days_ago(0)}
+    )
+
+    assert result.is_error
+
+
+async def test_farm_report_older_than_a_week_names_the_allowed_range(
+    build_test_app, backend
+):
+    result = await _report(
+        build_test_app, backend, {"from_date": _days_ago(7), "to_date": _days_ago(0)}
+    )
+
+    assert result.is_error
+    assert f"{_days_ago(6)} to {_days_ago(0)}" in result.content[0].text
+    assert backend.platform_requests == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"from_date": _days_ago(1), "to_date": _days_ago(2)},
+        {"from_date": _days_ago(0), "to_date": _days_ago(-1)},
+        {"farm_id": "  ", "from_date": _days_ago(1), "to_date": _days_ago(0)},
+        {"from_date": "28-09-2026", "to_date": _days_ago(0)},
+    ],
+)
+async def test_farm_report_rejects_invalid_input_without_calling_the_api(
+    build_test_app, backend, args
+):
+    result = await _report(build_test_app, backend, args)
+
+    assert result.is_error
+    assert backend.platform_requests == []
+
+
+SAVED_FEEDBACK = {
+    "id": "e1f2a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b",
+    "userId": "alice",
+    "message": "The irrigation page does not show my second farm.",
+    "createdAt": "2026-09-28T10:15:00.000Z",
+}
+
+
+async def _feedback(build_test_app, backend, message):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        return await client.call_tool("send_feedback", {"message": message})
+
+
+async def test_send_feedback_posts_only_the_stripped_message(build_test_app, backend):
+    backend.platform_responses["/api/feedback"] = (201, SAVED_FEEDBACK)
+    result = await _feedback(
+        build_test_app, backend, "  The irrigation page does not show my second farm. "
+    )
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == {
+        "sent": True,
+        "feedback_id": SAVED_FEEDBACK["id"],
+        "created_at": SAVED_FEEDBACK["createdAt"],
+    }
+    request = backend.platform_requests[0]
+    assert request.method == "POST"
+    assert request.url.path == "/api/feedback"
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+    assert json.loads(request.content) == {"message": SAVED_FEEDBACK["message"]}
+
+
+async def test_send_feedback_accepts_the_maximum_length(build_test_app, backend):
+    backend.platform_responses["/api/feedback"] = (201, SAVED_FEEDBACK)
+    result = await _feedback(build_test_app, backend, "x" * 1200)
+
+    assert not result.is_error
+
+
+async def test_send_feedback_400_relays_the_backend_reason(build_test_app, backend):
+    backend.platform_responses["/api/feedback"] = (400, {"message": "message too long"})
+    result = await _feedback(build_test_app, backend, "Nice app")
+
+    assert result.is_error
+    assert "message too long" in result.content[0].text
+
+
+@pytest.mark.parametrize("message", ["a", "   a   ", "x" * 1201])
+async def test_send_feedback_rejects_bad_lengths_without_calling_the_api(
+    build_test_app, backend, message
+):
+    result = await _feedback(build_test_app, backend, message)
+
+    assert result.is_error
+    assert backend.platform_requests == []

@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     alerts_history_path: str = Field(alias="NOJO_ALERTS_HISTORY_PATH", min_length=1)
     vpd_current_path: str = Field(alias="NOJO_VPD_CURRENT_PATH", min_length=1)
     vpd_history_path: str = Field(alias="NOJO_VPD_HISTORY_PATH", min_length=1)
+    feedback_path: str = Field(alias="NOJO_FEEDBACK_PATH", min_length=1)
+    farm_report_path: str = Field(
+        alias="NOJO_FARM_REPORT_PATH", pattern=r"\{farm_id\}"
+    )
 
     token_exchange_url: str = Field(alias="TOKEN_EXCHANGE_URL")
     mcp_oauth_client_id: str = Field(alias="MCP_OAUTH_CLIENT_ID")

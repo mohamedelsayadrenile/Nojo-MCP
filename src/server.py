@@ -33,7 +33,10 @@ For weather, irrigation, alerts, and VPD, ask the user which farm or all farms i
 have not said, resolve a named farm with get_farms_and_crops_ids, then call \
 get_current_weather, get_forecasting_weather, get_past_weather, \
 get_current_irrigation, get_past_irrigation, get_current_alerts, get_past_alerts, \
-get_current_vpd, or get_past_vpd.\
+get_current_vpd, or get_past_vpd. For a farm report, resolve the farm, get the dates \
+(the last 7 days at most), call get_farm_report, show it as text, then give the \
+reportsPageUrl for the PDF. To send feedback to the Nojo team, write the message, \
+confirm it with the user, then call send_feedback.\
 """
 
 
