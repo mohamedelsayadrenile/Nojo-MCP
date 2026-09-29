@@ -13,6 +13,11 @@ Streamable HTTP at `https://nojo.ai/mcp`.
 | `list_crops` | none | Crops from `GET /crops` |
 | `list_alerts` | none | Active alerts from `GET /alerts` |
 | `list_stations` | none | IoT stations from `GET /stations` |
+| `get_ledger` | `farm_id?` | Ledger entries per farm from `GET /farmer-ledger/overview` |
+| `get_ledger_options` | none | Actions and categories from `GET /farmer-ledger/options` |
+| `add_ledger_entry` | `farm_id`, `crop_id`, `action_id`, `category_id`, `amount`, `entry_date?`, `description?`, `description_ar?` | Saved entry from `POST /farmer-ledger` |
+| `edit_ledger_entry` | `entry_id` plus any fields to change | Updated entry from `PUT /farmer-ledger/{entry_id}` |
+| `delete_ledger_entry` | `entry_id` | `{"deleted", "entry_id", "message"}` via `DELETE /farmer-ledger/{entry_id}` |
 
 `whoami` makes no upstream call. It reports what the token exchange already established, so a
 successful call is a green light for the whole chain: discovery → authorize → token → exchange.

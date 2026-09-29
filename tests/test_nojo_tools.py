@@ -504,6 +504,7 @@ FARM_SCOPED_TOOLS = {
     "get_past_alerts": ("/api/alerts/overview/history", {}),
     "get_current_vpd": ("/api/agronomy/vpd/overview", {}),
     "get_past_vpd": ("/api/agronomy/vpd/overview/history", {"days": "1"}),
+    "get_ledger": ("/api/farmer-ledger/overview", {}),
 }
 PAST_TOOLS = {
     "get_past_weather": "/api/weather/overview/history",
@@ -762,3 +763,211 @@ async def test_send_feedback_rejects_bad_lengths_without_calling_the_api(
 
     assert result.is_error
     assert backend.platform_requests == []
+
+
+LEDGER_OPTIONS = {
+    "actions": [{"actionId": "a-1", "name": "Purchase", "nameAr": "شراء"}],
+    "categories": [{"categoryId": "k-1", "name": "Fertilizer", "nameAr": "أسمدة"}],
+}
+
+
+async def test_get_ledger_options_returns_the_options(build_test_app, backend):
+    backend.platform_responses["/api/farmer-ledger/options"] = (200, LEDGER_OPTIONS)
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("get_ledger_options", {})
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == LEDGER_OPTIONS
+
+
+async def test_get_ledger_options_malformed_response_is_a_tool_error(
+    build_test_app, backend
+):
+    backend.platform_responses["/api/farmer-ledger/options"] = (200, {"actions": []})
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        result = await client.call_tool("get_ledger_options", {})
+
+    assert result.is_error
+
+
+ENTRY_ID = "f1e2d3c4-b5a6-9788-6950-4a3b2c1d0e9f"
+LEDGER_PATH = "/api/farmer-ledger"
+LEDGER_ENTRY_PATH = f"/api/farmer-ledger/{ENTRY_ID}"
+ADD_ENTRY_ARGS = {
+    "farm_id": FARM_ID,
+    "crop_id": f" {CROP_ID} ",
+    "action_id": "a-1",
+    "category_id": "k-1",
+    "amount": 1250.5,
+}
+SAVED_ENTRY = {"id": ENTRY_ID, "farmId": FARM_ID, "amount": "1250.5"}
+
+
+async def _call(build_test_app, backend, tool, args):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        return await client.call_tool(tool, args)
+
+
+async def test_add_ledger_entry_posts_exactly_the_documented_fields(
+    build_test_app, backend
+):
+    backend.platform_responses[LEDGER_PATH] = (201, SAVED_ENTRY)
+    args = {
+        **ADD_ENTRY_ARGS,
+        "entry_date": "2026-09-22T12:10:00Z",
+        "description": "  Hand weeding ",
+    }
+    result = await _call(build_test_app, backend, "add_ledger_entry", args)
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == SAVED_ENTRY
+    request = backend.platform_requests[0]
+    assert request.method == "POST"
+    assert request.headers["authorization"] == "Bearer nojo-jwt-alice"
+    assert json.loads(request.content) == {
+        "farmId": FARM_ID,
+        "cropId": CROP_ID,
+        "actionId": "a-1",
+        "actionTypeId": "k-1",
+        "amount": 1250.5,
+        "entryDate": "2026-09-22T12:10:00+00:00",
+        "description": "Hand weeding",
+    }
+
+
+async def test_add_ledger_entry_omits_unset_optional_fields(build_test_app, backend):
+    backend.platform_responses[LEDGER_PATH] = (201, SAVED_ENTRY)
+    await _call(build_test_app, backend, "add_ledger_entry", ADD_ENTRY_ARGS)
+
+    body = json.loads(backend.platform_requests[0].content)
+    assert set(body) == {"farmId", "cropId", "actionId", "actionTypeId", "amount"}
+
+
+async def test_add_ledger_entry_400_relays_the_backend_reason(build_test_app, backend):
+    backend.platform_responses[LEDGER_PATH] = (400, {"message": "Crop cycle has ended"})
+    result = await _call(build_test_app, backend, "add_ledger_entry", ADD_ENTRY_ARGS)
+
+    assert result.is_error
+    assert "Crop cycle has ended" in result.content[0].text
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"amount": 0},
+        {"amount": -5},
+        {"amount": 10_000_000_000},
+        {"farm_id": "  "},
+        {"crop_id": ""},
+        {"category_id": " "},
+        {"entry_date": (date.today() + timedelta(days=2)).isoformat() + "T00:00:00Z"},
+        {"description": "x" * 101},
+        {"description_ar": "  "},
+    ],
+)
+async def test_add_ledger_entry_rejects_invalid_input_without_calling_the_api(
+    build_test_app, backend, overrides
+):
+    args = {**ADD_ENTRY_ARGS, **overrides}
+    result = await _call(build_test_app, backend, "add_ledger_entry", args)
+
+    assert result.is_error
+    assert backend.platform_requests == []
+
+
+@pytest.mark.parametrize(
+    "args, body",
+    [
+        ({"amount": 1500}, {"amount": 1500}),
+        ({"category_id": "k-2"}, {"actionTypeId": "k-2"}),
+        (
+            {"crop_id": CROP_ID, "entry_date": "2026-09-21T09:00:00+00:00"},
+            {"cropId": CROP_ID, "entryDate": "2026-09-21T09:00:00+00:00"},
+        ),
+    ],
+)
+async def test_edit_ledger_entry_puts_only_the_changed_fields(
+    build_test_app, backend, args, body
+):
+    backend.platform_responses[LEDGER_ENTRY_PATH] = (200, SAVED_ENTRY)
+    result = await _call(
+        build_test_app, backend, "edit_ledger_entry", {"entry_id": ENTRY_ID, **args}
+    )
+
+    assert not result.is_error
+    request = backend.platform_requests[0]
+    assert request.method == "PUT"
+    assert request.url.path == LEDGER_ENTRY_PATH
+    assert json.loads(request.content) == body
+
+
+async def test_edit_ledger_entry_400_relays_the_backend_reason(build_test_app, backend):
+    backend.platform_responses[LEDGER_ENTRY_PATH] = (400, {"message": "Farm cycle ended"})
+    result = await _call(
+        build_test_app, backend, "edit_ledger_entry", {"entry_id": ENTRY_ID, "amount": 9}
+    )
+
+    assert result.is_error
+    assert "Farm cycle ended" in result.content[0].text
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"entry_id": ENTRY_ID},
+        {"entry_id": "  ", "amount": 5},
+        {"entry_id": ENTRY_ID, "amount": 0},
+        {"entry_id": ENTRY_ID, "action_id": ""},
+    ],
+)
+async def test_edit_ledger_entry_rejects_invalid_input_without_calling_the_api(
+    build_test_app, backend, args
+):
+    result = await _call(build_test_app, backend, "edit_ledger_entry", args)
+
+    assert result.is_error
+    assert backend.platform_requests == []
+
+
+async def test_delete_ledger_entry_sends_delete(build_test_app, backend):
+    backend.platform_responses[LEDGER_ENTRY_PATH] = (
+        200,
+        {"message": "Ledger entry deleted successfully"},
+    )
+    result = await _call(
+        build_test_app, backend, "delete_ledger_entry", {"entry_id": f" {ENTRY_ID} "}
+    )
+
+    assert not result.is_error
+    assert json.loads(result.content[0].text) == {
+        "deleted": True,
+        "entry_id": ENTRY_ID,
+        "message": "Ledger entry deleted successfully",
+    }
+    request = backend.platform_requests[0]
+    assert request.method == "DELETE"
+    assert request.url.path == LEDGER_ENTRY_PATH
+
+
+async def test_delete_ledger_entry_not_found_is_a_tool_error(build_test_app, backend):
+    backend.platform_responses[LEDGER_ENTRY_PATH] = (404, {"message": "Not found"})
+    result = await _call(
+        build_test_app, backend, "delete_ledger_entry", {"entry_id": ENTRY_ID}
+    )
+
+    assert result.is_error
+
+
+async def test_ledger_tools_have_the_right_annotations(build_test_app, backend):
+    app = build_test_app()
+    async with running(app), mcp_client(app, backend.grant("alice")) as client:
+        tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+
+    assert tools["get_ledger"].annotations.read_only_hint is True
+    assert tools["get_ledger_options"].annotations.read_only_hint is True
+    assert tools["add_ledger_entry"].annotations.read_only_hint is False
+    assert tools["edit_ledger_entry"].annotations.idempotent_hint is True
+    assert tools["delete_ledger_entry"].annotations.destructive_hint is True

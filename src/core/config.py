@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     farm_report_path: str = Field(
         alias="NOJO_FARM_REPORT_PATH", pattern=r"\{farm_id\}"
     )
+    ledger_overview_path: str = Field(
+        alias="NOJO_LEDGER_OVERVIEW_PATH", min_length=1
+    )
+    ledger_path: str = Field(alias="NOJO_LEDGER_PATH", min_length=1)
+    ledger_entry_path: str = Field(
+        alias="NOJO_LEDGER_ENTRY_PATH", pattern=r"\{entry_id\}"
+    )
+    ledger_options_path: str = Field(alias="NOJO_LEDGER_OPTIONS_PATH", min_length=1)
 
     token_exchange_url: str = Field(alias="TOKEN_EXCHANGE_URL")
     mcp_oauth_client_id: str = Field(alias="MCP_OAUTH_CLIENT_ID")

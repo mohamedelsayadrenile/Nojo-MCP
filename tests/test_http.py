@@ -105,6 +105,11 @@ async def test_registered_tools(build_test_app, backend, mode):
         "get_past_vpd",
         "get_farm_report",
         "send_feedback",
+        "get_ledger",
+        "get_ledger_options",
+        "add_ledger_entry",
+        "edit_ledger_entry",
+        "delete_ledger_entry",
     }
     schemas = {tool.name: tool.input_schema for tool in tools}
     assert schemas.pop("delete_farm")["required"] == ["farm_id"]
@@ -145,6 +150,16 @@ async def test_registered_tools(build_test_app, backend, mode):
         "days",
         "farm_id",
     }
+    assert schemas.pop("get_ledger")["properties"].keys() == {"farm_id"}
+    assert set(schemas.pop("add_ledger_entry")["required"]) == {
+        "farm_id",
+        "crop_id",
+        "action_id",
+        "category_id",
+        "amount",
+    }
+    assert schemas.pop("edit_ledger_entry")["required"] == ["entry_id"]
+    assert schemas.pop("delete_ledger_entry")["required"] == ["entry_id"]
     assert all(schema.get("properties", {}) == {} for schema in schemas.values())
     assert all("required" not in schema for schema in schemas.values())
 

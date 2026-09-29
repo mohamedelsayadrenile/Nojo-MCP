@@ -39,6 +39,9 @@ class NojoClient:
     async def patch(self, jwt: str, path: str, body: dict[str, Any]) -> Any:
         return await self._request("PATCH", jwt, path, json=body)
 
+    async def put(self, jwt: str, path: str, body: dict[str, Any]) -> Any:
+        return await self._request("PUT", jwt, path, json=body)
+
     async def _request(
         self,
         method: str,

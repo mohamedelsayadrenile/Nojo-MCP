@@ -1,7 +1,7 @@
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -613,6 +613,202 @@ async def edit_farm(
     return farm
 
 
+_LEDGER_LISTS = ("actions", "categories")
+_LEDGER_TEXT_MAX = 100
+_LedgerAmount = Annotated[float, Field(gt=0, le=9_999_999_999)]
+
+
+async def get_ledger(ctx: ServerContext, farm_id: str | None = None) -> Any:
+    settings = ctx.request_context.lifespan_context.settings
+    return await _farm_scoped(
+        ctx, settings.ledger_overview_path, _farm_params(farm_id)
+    )
+
+
+async def get_ledger_options(ctx: ServerContext) -> dict[str, Any]:
+    caller = _caller()
+    state = ctx.request_context.lifespan_context
+    path = state.settings.ledger_options_path
+    logger.info("ledger_options_requested sub=%s", caller.subject)
+    options = await state.nojo_client.get(caller.nojo_jwt, path)
+    if not isinstance(options, dict) or not all(
+        isinstance(options.get(key), list) for key in _LEDGER_LISTS
+    ):
+        logger.warning("ledger_options_failed path=%s reason=malformed_response", path)
+        raise NojoAPIRequestError(
+            f"The Nojo platform API returned an unexpected response for {path}."
+        )
+    return options
+
+
+def _entry_date(entry_date: datetime) -> str:
+    if entry_date.tzinfo is None:
+        entry_date = entry_date.replace(tzinfo=UTC)
+    if entry_date > datetime.now(UTC):
+        raise ToolError(
+            "The entry date can't be in the future. Ask the user when it happened."
+        )
+    return entry_date.isoformat()
+
+
+def _ledger_text(value: str, name: str) -> str:
+    value = value.strip()
+    if not 1 <= len(value) <= _LEDGER_TEXT_MAX:
+        raise ToolError(
+            f"{name} must be 1-{_LEDGER_TEXT_MAX} characters. Ask the user to "
+            "shorten it."
+        )
+    return value
+
+
+def _ledger_rejected(exc: NojoAPIRequestError) -> ToolError:
+    return ToolError(
+        f"Nojo rejected the ledger entry: {exc.detail or 'invalid input'}. Tell the "
+        "user. If the crop's or the farm's cycle has ended, do not retry; "
+        "otherwise ask them to correct it."
+    )
+
+
+def _ledger_body(
+    crop_id: str | None,
+    action_id: str | None,
+    category_id: str | None,
+    amount: float | None,
+    entry_date: datetime | None,
+    description: str | None,
+    description_ar: str | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {}
+    if crop_id is not None:
+        body["cropId"] = _required_id(crop_id, "crop_id", "get_farms_and_crops_ids")
+    if action_id is not None:
+        body["actionId"] = _required_id(action_id, "action_id", "get_ledger_options")
+    if category_id is not None:
+        body["actionTypeId"] = _required_id(
+            category_id, "category_id", "get_ledger_options"
+        )
+    if amount is not None:
+        body["amount"] = amount
+    if entry_date is not None:
+        body["entryDate"] = _entry_date(entry_date)
+    if description is not None:
+        body["description"] = _ledger_text(description, "description")
+    if description_ar is not None:
+        body["descriptionAr"] = _ledger_text(description_ar, "description_ar")
+    return body
+
+
+async def add_ledger_entry(
+    ctx: ServerContext,
+    farm_id: str,
+    crop_id: str,
+    action_id: str,
+    category_id: str,
+    amount: _LedgerAmount,
+    entry_date: datetime | None = None,
+    description: str | None = None,
+    description_ar: str | None = None,
+) -> Any:
+    caller = _caller()
+    farm_id = _required_id(farm_id, "farm_id", "get_farms_and_crops_ids")
+    body = {
+        "farmId": farm_id,
+        **_ledger_body(
+            crop_id,
+            action_id,
+            category_id,
+            amount,
+            entry_date,
+            description,
+            description_ar,
+        ),
+    }
+
+    state = ctx.request_context.lifespan_context
+    logger.info("ledger_create_requested sub=%s farm_id=%s", caller.subject, farm_id)
+    try:
+        entry = await state.nojo_client.post(
+            caller.nojo_jwt, state.settings.ledger_path, body
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400:
+            raise _ledger_rejected(exc) from exc
+        raise
+
+    entry_id = entry.get("id") if isinstance(entry, dict) else None
+    logger.info(
+        "ledger_entry_created sub=%s farm_id=%s entry_id=%s",
+        caller.subject,
+        farm_id,
+        entry_id,
+    )
+    return entry
+
+
+async def edit_ledger_entry(
+    ctx: ServerContext,
+    entry_id: str,
+    crop_id: str | None = None,
+    action_id: str | None = None,
+    category_id: str | None = None,
+    amount: _LedgerAmount | None = None,
+    entry_date: datetime | None = None,
+    description: str | None = None,
+    description_ar: str | None = None,
+) -> Any:
+    caller = _caller()
+    entry_id = _required_id(entry_id, "entry_id", "get_ledger")
+    body = _ledger_body(
+        crop_id, action_id, category_id, amount, entry_date, description, description_ar
+    )
+    if not body:
+        raise ToolError(
+            "Nothing to change. Pass at least one of crop_id, action_id, "
+            "category_id, amount, entry_date, description, or description_ar."
+        )
+
+    state = ctx.request_context.lifespan_context
+    logger.info(
+        "ledger_update_requested sub=%s entry_id=%s fields=%s",
+        caller.subject,
+        entry_id,
+        ",".join(body),
+    )
+    try:
+        entry = await state.nojo_client.put(
+            caller.nojo_jwt,
+            state.settings.ledger_entry_path.format(entry_id=entry_id),
+            body,
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400:
+            raise _ledger_rejected(exc) from exc
+        raise
+
+    logger.info("ledger_entry_updated sub=%s entry_id=%s", caller.subject, entry_id)
+    return entry
+
+
+async def delete_ledger_entry(ctx: ServerContext, entry_id: str) -> dict[str, Any]:
+    caller = _caller()
+    entry_id = _required_id(entry_id, "entry_id", "get_ledger")
+
+    state = ctx.request_context.lifespan_context
+    logger.info("ledger_delete_requested sub=%s entry_id=%s", caller.subject, entry_id)
+    try:
+        result = await state.nojo_client.delete(
+            caller.nojo_jwt, state.settings.ledger_entry_path.format(entry_id=entry_id)
+        )
+    except NojoAPIRequestError as exc:
+        if exc.status_code == 400:
+            raise _ledger_rejected(exc) from exc
+        raise
+
+    logger.info("ledger_entry_deleted sub=%s entry_id=%s", caller.subject, entry_id)
+    message = result.get("message") if isinstance(result, dict) else None
+    return {"deleted": True, "entry_id": entry_id, "message": message}
+
+
 _FARM_SCOPE_RULES = (
     "If the user has not said which farm (or all farms), ask them first: one "
     "specific farm, or all their farms? For one farm, resolve its farmId with "
@@ -802,6 +998,32 @@ _DESCRIPTIONS = {
         + " If the user asks about one crop, answer only for it, matching "
         "cropName, cropNameAr, or aliasCropName loosely.\n\n" + _FARM_SCOPE_RULES
     ),
+    get_ledger: (
+        "Get the authenticated farmer's ledger: every money entry they recorded "
+        "in Nojo (what they spent or earned, on what, for which crop, and when), "
+        "newest first, with each farm's `totalAmount`.\n"
+        "Each entry has `entryId` (needed to edit or delete it), `date`, `action` "
+        "(e.g. Expense, Payment, Purchase, Harvest), `category` (what it was for, "
+        "e.g. Fertilizer, Seeds, Labor, Water, Fuel), `amount`, the crop names, "
+        "`description` and `notes`. Amounts are in the farm's `currency` (e.g. "
+        "EGP, SAR); always show the currency with them. `cropId` null means the "
+        "entry is for the whole farm, not one crop. The *Ar fields hold the same "
+        "text in Arabic, so answer in the user's language. Any text field can be "
+        "null. An empty `entries` list means the farm has no ledger entries yet. "
+        "If the user asks about one crop, answer only for it, matching cropName, "
+        "cropNameAr, or aliasCropName loosely.\n\n" + _FARM_SCOPE_RULES
+    ),
+    get_ledger_options: (
+        "List the actions and categories a ledger entry can use, as names and ids "
+        "only, the same choices as the website's add-entry form.\n\n"
+        'Returns {"actions": [{"actionId": str, "name": str, "nameAr": str}], '
+        '"categories": [{"categoryId": str, "name": str, "nameAr": str}]}.\n'
+        "Call this when adding or editing a ledger entry to turn the user's action "
+        "(what kind of entry, e.g. Purchase) and category (what it was for, e.g. "
+        "Fertilizer) into ids. Match the user's words loosely against both name "
+        "and nameAr, accepting typos. If nothing fits, use the one named 'Other' "
+        "and keep the user's own words for it. Never invent an id."
+    ),
     get_farms_and_crops_ids: (
         "List the authenticated farmer's farms and the crops on each, as names "
         "and ids only.\n\n"
@@ -946,6 +1168,67 @@ _EDIT_FARM_DESCRIPTION = (
 )
 
 
+_LEDGER_INPUT_RULES = (
+    "- action_id and category_id: the actionId and categoryId from "
+    "get_ledger_options. If the chosen action is 'Other', pass the user's own "
+    "name for it as `description`; if the chosen category is 'Other', pass "
+    f"theirs as `description_ar`. Each at most {_LEDGER_TEXT_MAX} characters.\n"
+    "- amount: the money as a number, more than 0 and at most 9,999,999,999, in "
+    "the farm's currency (see get_ledger). Never convert it.\n"
+    "- entry_date: when it happened, ISO date and time, not in the future. Omit "
+    "it for now.\n"
+    "A harvest can't be recorded as an entry: on the website it is recorded by "
+    "ending the crop's cycle. If the user wants that, send them to the ledger page "
+    "on the Nojo website.\n"
+    "Entries can't be added, edited, or deleted once the crop's cycle or the "
+    "farm's cycle has ended (harvested). If Nojo says so, tell the user and do "
+    "not retry.\n"
+)
+
+_ADD_LEDGER_ENTRY_DESCRIPTION = (
+    "Add a new money entry (an expense, payment, purchase, ...) to one of the "
+    "authenticated farmer's farms' ledger.\n\n"
+    "Resolve the ids first; never invent one:\n"
+    "- farm_id and crop_id: a farmId and one of its cropIds from "
+    "get_farms_and_crops_ids, matching the names the user gave loosely (accept "
+    "typos). The crop is required and must be on that farm; if the user did not "
+    "say which crop, ask them.\n"
+    + _LEDGER_INPUT_RULES
+    + "Before calling, show the user the entry (farm, crop, action, category, "
+    "amount with currency, date) and ask them to confirm; call only after they "
+    "agree.\n"
+    "Returns the saved entry, including its id. `amount` comes back as text; read "
+    "it as a number."
+)
+
+_EDIT_LEDGER_ENTRY_DESCRIPTION = (
+    "Change one or more details of an existing entry in the authenticated "
+    "farmer's ledger: its crop, action, category, amount, or date.\n\n"
+    "`entry_id` must be an entryId returned by get_ledger: find the entry the "
+    "user means there (by date, amount, category, or crop); if several could "
+    "match, ask the user which one. A new crop_id must be a cropId on the same "
+    "farm from get_farms_and_crops_ids.\n"
+    "Pass only the fields the user wants to change and do not ask about the "
+    "others:\n"
+    + _LEDGER_INPUT_RULES
+    + "Before calling, show the user the change and ask them to confirm; call "
+    "only after they agree.\n"
+    "Returns the updated entry. `amount` comes back as text; read it as a number."
+)
+
+_DELETE_LEDGER_ENTRY_DESCRIPTION = (
+    "Permanently delete one entry from the authenticated farmer's ledger.\n\n"
+    "`entry_id` must be an entryId returned by get_ledger: find the entry the "
+    "user means there (by date, amount, category, or crop); if several could "
+    "match, ask the user which one. Before calling, always ask the user to "
+    "confirm, naming the entry (e.g. 'Delete the 1,250.5 EGP Fertilizer purchase "
+    "of 22 Sep on North Farm?'), and call only after they agree. An entry can't "
+    "be deleted once its crop's or farm's cycle has ended; if Nojo says so, tell "
+    "the user and do not retry.\n"
+    'Returns {"deleted": true, "entry_id": str, "message": str}.'
+)
+
+
 def register_tools(mcp: MCPServer[AppState]) -> None:
     for tool, description in _DESCRIPTIONS.items():
         mcp.tool(annotations=_READ_ONLY, description=description)(tool)
@@ -965,4 +1248,13 @@ def register_tools(mcp: MCPServer[AppState]) -> None:
     )
     mcp.tool(annotations=_IDEMPOTENT_WRITE, description=_EDIT_CROP_DESCRIPTION)(
         edit_crop
+    )
+    mcp.tool(annotations=_CREATE, description=_ADD_LEDGER_ENTRY_DESCRIPTION)(
+        add_ledger_entry
+    )
+    mcp.tool(
+        annotations=_IDEMPOTENT_WRITE, description=_EDIT_LEDGER_ENTRY_DESCRIPTION
+    )(edit_ledger_entry)
+    mcp.tool(annotations=_DESTRUCTIVE, description=_DELETE_LEDGER_ENTRY_DESCRIPTION)(
+        delete_ledger_entry
     )
