@@ -140,12 +140,12 @@ proxy's address lets the app see the real scheme and host. `NOJO_RESOURCE_SERVER
 public HTTPS URL, not the internal one — clients compare it exactly. `/healthz` is an unauthenticated
 health check.
 
-## Staging
+## Environments
 
 Nothing about the host is baked into the code — `NOJO_ISSUER_URL`, `NOJO_RESOURCE_SERVER_URL`,
 `TOKEN_EXCHANGE_URL` and `ALLOWED_HOSTS` are the whole story, so the same build points at staging or
-production by env alone. `src/.env.example` currently carries the staging host
-`41.38.196.107.nip.io`; production is `nojo.ai`.
+production by env alone. `src/.env.example` carries the production host
+`nojo.ai`; staging overrides it with `41.38.196.107.nip.io` in its own `src/.env`.
 
 All four must move together, and the backend has to agree:
 
@@ -167,7 +167,7 @@ signed-in user's id.
 From the Claude Code CLI:
 
 ```bash
-claude mcp add --transport http nojo https://41.38.196.107.nip.io/mcp
+claude mcp add --transport http nojo https://nojo.ai/mcp
 ```
 
 Then run `/mcp` in a session to authenticate.

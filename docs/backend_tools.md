@@ -1,6 +1,6 @@
-# Nojo MCP Test APIs (Test Server)
+# Nojo MCP APIs
 
-**Base URL:** `https://41.38.196.107.nip.io/api`  
+**Base URL:** `https://nojo.ai/api`  
 **Authorization Header:** `Authorization: Bearer $NOJO`
 
 ## APIs
