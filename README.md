@@ -109,7 +109,7 @@ container published on `127.0.0.1:8000`, behind the host's existing reverse prox
 above). `src/.env` is injected at run time through `env_file` and is never copied into the image.
 
 ```bash
-git clone <repo-url> Nojo-MCP && cd Nojo-MCP
+git clone https://github.com/mohamedelsayadrenile/Nojo-MCP.git Nojo-MCP && cd Nojo-MCP
 cp src/.env.example src/.env && chmod 600 src/.env   # fill in MCP_OAUTH_CLIENT_ID / SECRET
 docker compose up -d --build
 
