@@ -102,6 +102,31 @@ missing required value surfaces as a pydantic `ValidationError` while uvicorn is
 
 ## Deployment
 
+### Docker (production)
+
+[`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml) run the server in one
+container published on `127.0.0.1:8000`, behind the host's existing reverse proxy (routing table
+above). `src/.env` is injected at run time through `env_file` and is never copied into the image.
+
+```bash
+git clone <repo-url> Nojo-MCP && cd Nojo-MCP
+cp src/.env.example src/.env && chmod 600 src/.env   # fill in MCP_OAUTH_CLIENT_ID / SECRET
+docker compose up -d --build
+
+docker compose ps                       # state (healthy once /healthz answers)
+docker compose logs -f nojo-mcp         # logs
+curl -s http://127.0.0.1:8000/healthz   # health check
+
+# Update code
+git pull && docker compose up -d --build
+# After a src/.env change only
+docker compose up -d --force-recreate
+```
+
+Run either the container or the systemd service below, not both: they bind the same port.
+
+### systemd (without Docker)
+
 The server runs as a systemd service from [`deploy/nojo-mcp.service`](deploy/nojo-mcp.service):
 installed at `/opt/nojo-mcp`, running as the `nojo` system user, listening on `127.0.0.1:8000` behind
 the reverse proxy. Edit the unit first if any of those differ on your server.

@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+.claude
+.pytest_cache
+**/__pycache__
+**/*.py[oc]
+tests
+docs
+deploy
+*.ipynb
+.ipynb_checkpoints
+
+# Secrets: compose injects these at run time.
+.env
+**/.env

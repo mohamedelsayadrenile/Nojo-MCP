@@ -1,0 +1,16 @@
+services:
+  nojo-mcp:
+    build: .
+    image: nojo-mcp:latest
+    container_name: nojo-mcp
+    env_file: src/.env
+    # Loopback only: the host's reverse proxy terminates HTTPS for nojo.ai and
+    # forwards /mcp* and /.well-known/oauth-protected-resource* here.
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
